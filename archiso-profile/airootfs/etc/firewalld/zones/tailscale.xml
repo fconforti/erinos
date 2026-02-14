@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>Tailscale</short>
+  <description>Zone for the tailscale0 interface. SSH allowed for remote management over the WireGuard mesh VPN.</description>
+  <interface name="tailscale0"/>
+  <service name="ssh"/>
+</zone>

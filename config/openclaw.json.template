@@ -1,0 +1,38 @@
+{
+  "gateway": {
+    "bind": "loopback",
+    "auth": {
+      "type": "token",
+      "token": "__AUTH_TOKEN__"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "__SELECTED_MODEL__",
+      "compaction": {
+        "mode": "safeguard",
+        "reserveTokens": 8000
+      },
+      "bootstrapMaxChars": 5000,
+      "sandbox": {
+        "mode": "all",
+        "docker": {
+          "network": "none",
+          "readOnlyRoot": true
+        }
+      }
+    }
+  },
+  "skills": {
+    "defaults": {
+      "enabled": false
+    }
+  },
+  "channels": __CHANNEL_CONFIG__,
+  "models": {
+    "routing": {
+      "light": "__MODEL_LIGHT__",
+      "heavy": "__MODEL_HEAVY__"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+# archiso build artifacts
+work/
+out/
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Secrets (should never be committed)
+*.key
+*.pem

@@ -1,0 +1,7 @@
+{
+  "icc": false,
+  "userland-proxy": false,
+  "no-new-privileges": true,
+  "log-driver": "journald",
+  "storage-driver": "overlay2"
+}

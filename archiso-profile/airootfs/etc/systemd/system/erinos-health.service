@@ -1,0 +1,13 @@
+[Unit]
+Description=ErinOS boot health check
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/erinos doctor --boot
+User=root
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

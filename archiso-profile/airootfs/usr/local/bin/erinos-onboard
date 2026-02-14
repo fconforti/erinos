@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# erinos-onboard — First-boot onboarding wizard for ErinOS
+# Uses gum for interactive prompts and qrencode for terminal QR codes.
+
+STATE_DIR="/var/lib/erinos"
+
+die() { printf 'erinos-onboard: %s\n' "$1" >&2; exit 1; }
+
+check_deps() {
+    local missing=()
+    for cmd in gum qrencode nmtui tailscale ollama; do
+        if ! command -v "${cmd}" &>/dev/null; then
+            missing+=("${cmd}")
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "missing dependencies: ${missing[*]}"
+    fi
+}
+
+banner() {
+    gum style \
+        --border double \
+        --align center \
+        --width 50 \
+        --margin "1 2" \
+        --padding "1 2" \
+        "Welcome to ErinOS v0.1" \
+        "" \
+        "Local-first AI assistant appliance"
+}
+
+# Step 1: Network
+step_network() {
+    gum style --bold "Step 1/6: Network Configuration"
+    printf '\nLaunching network manager...\n'
+    nmtui
+
+    # Wait for connectivity
+    printf 'Checking connectivity... '
+    local retries=10
+    while [[ ${retries} -gt 0 ]]; do
+        if curl -s --max-time 3 https://archlinux.org >/dev/null 2>&1; then
+            printf 'OK\n'
+            return 0
+        fi
+        ((retries--)) || true
+        sleep 2
+    done
+    printf 'FAILED\n'
+    gum confirm "No internet detected. Continue anyway?" || die "network required"
+}
+
+# Step 2: Tailscale
+step_tailscale() {
+    gum style --bold "Step 2/6: Tailscale Setup"
+
+    # Start tailscaled if not running
+    if ! systemctl is-active tailscaled.service &>/dev/null; then
+        sudo systemctl start tailscaled.service
+    fi
+
+    # Get login URL
+    printf '\nGenerating Tailscale login URL...\n'
+    local login_url
+    login_url=$(tailscale up 2>&1 | grep -oP 'https://\S+' | head -1) || true
+
+    if [[ -n "${login_url}" ]]; then
+        printf '\nScan this QR code to authenticate:\n\n'
+        qrencode -t ANSI "${login_url}"
+        printf '\nOr visit: %s\n' "${login_url}"
+
+        printf '\nWaiting for authentication...\n'
+        local retries=60
+        while [[ ${retries} -gt 0 ]]; do
+            if tailscale status &>/dev/null 2>&1; then
+                printf 'Tailscale connected!\n'
+                tailscale status --self
+                return 0
+            fi
+            ((retries--)) || true
+            sleep 5
+        done
+        gum confirm "Tailscale auth timed out. Continue without it?" || die "tailscale required"
+    else
+        # Already authenticated
+        printf 'Tailscale is already connected.\n'
+        tailscale status --self
+    fi
+}
+
+# Step 3: Models
+step_models() {
+    gum style --bold "Step 3/6: Model Configuration"
+
+    # Detect hardware
+    printf '\nDetecting hardware...\n'
+    local ram_gb gpu_vendor vram_mb
+    ram_gb=$(free -g | awk '/Mem:/{print $2}')
+    gpu_vendor=$(lspci 2>/dev/null | grep -i 'vga\|3d\|display' | head -1 || echo "none")
+    vram_mb=0
+
+    # NVIDIA VRAM
+    if command -v nvidia-smi &>/dev/null; then
+        vram_mb=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1) || vram_mb=0
+    fi
+
+    # AMD VRAM
+    if [[ ${vram_mb} -eq 0 ]]; then
+        local vram_file
+        for vram_file in /sys/class/drm/card*/device/mem_info_vram_total; do
+            if [[ -f "${vram_file}" ]]; then
+                local vram_bytes
+                vram_bytes=$(cat "${vram_file}")
+                vram_mb=$((vram_bytes / 1024 / 1024))
+                break
+            fi
+        done
+    fi
+
+    printf '  RAM:  %s GB\n' "${ram_gb}"
+    printf '  GPU:  %s\n' "${gpu_vendor}"
+    printf '  VRAM: %s MB\n' "${vram_mb}"
+
+    # Suggest models based on hardware
+    local suggested_model="phi3:mini"
+    if [[ ${ram_gb} -ge 32 && ${vram_mb} -ge 16000 ]]; then
+        suggested_model="qwen3:30b-coder"
+    elif [[ ${ram_gb} -ge 16 && ${vram_mb} -ge 8000 ]]; then
+        suggested_model="qwen3:8b"
+    elif [[ ${ram_gb} -ge 16 ]]; then
+        suggested_model="llama3.2:3b"
+    fi
+
+    printf '\nSuggested model: %s\n\n' "${suggested_model}"
+
+    local model_choice
+    model_choice=$(gum choose \
+        "${suggested_model} (recommended)" \
+        "phi3:mini (3.8B — lightweight)" \
+        "llama3.2:3b (3B)" \
+        "qwen3:8b (8B)" \
+        "qwen3:30b-coder (30B)" \
+        "Skip — configure later")
+
+    # Extract model name (strip description)
+    local model_name
+    model_name=$(printf '%s' "${model_choice}" | awk '{print $1}')
+
+    if [[ "${model_name}" != "Skip" ]]; then
+        printf '\nPulling model: %s\n' "${model_name}"
+        ollama pull "${model_name}"
+        mkdir -p "${STATE_DIR}"
+        printf '%s\n' "${model_name}" > "${STATE_DIR}/active-model"
+        printf '%s\n' "${model_name}" > "${STATE_DIR}/model-light"
+    fi
+
+    # Cloud provider (optional)
+    printf '\n'
+    if gum confirm "Configure a cloud model provider? (optional)"; then
+        local provider
+        provider=$(gum choose "Anthropic" "OpenAI" "Google" "Skip")
+        if [[ "${provider}" != "Skip" ]]; then
+            printf '\nPaste your %s API key:\n' "${provider}"
+            local api_key
+            api_key=$(gum input --password --placeholder "sk-...")
+            if [[ -n "${api_key}" ]]; then
+                mkdir -p "${STATE_DIR}"
+                printf '%s\n' "${api_key}" > "${STATE_DIR}/cloud-api-key"
+                chmod 600 "${STATE_DIR}/cloud-api-key"
+                printf '%s\n' "${provider}" > "${STATE_DIR}/cloud-provider"
+                printf 'Cloud provider configured: %s\n' "${provider}"
+            fi
+        fi
+    fi
+}
+
+# Step 4: Messaging
+step_messaging() {
+    gum style --bold "Step 4/6: Messaging Channel"
+
+    local channel
+    channel=$(gum choose \
+        "Telegram" \
+        "Discord" \
+        "WhatsApp" \
+        "Slack" \
+        "Signal" \
+        "Skip — configure later")
+
+    if [[ "${channel}" == "Skip"* ]]; then
+        printf 'Skipping channel setup. Run "erinos channel add" later.\n'
+        return 0
+    fi
+
+    printf '\nConfiguring %s...\n' "${channel}"
+    printf 'Follow the instructions for your platform to create a bot/integration.\n'
+    printf 'OpenClaw will guide you through the specific setup.\n\n'
+
+    mkdir -p "${STATE_DIR}"
+    printf '%s\n' "${channel}" > "${STATE_DIR}/channel"
+}
+
+# Step 5: Skills
+step_skills() {
+    gum style --bold "Step 5/6: Skills"
+
+    printf '\nSkills are OpenClaw capabilities. All are disabled by default.\n'
+    printf 'Each enabled skill adds tokens to the context window.\n\n'
+
+    local safe_skills moderate_skills elevated_skills
+    safe_skills=$(gum choose --no-limit \
+        "reminders" \
+        "notes" \
+        "calendar" \
+        "weather" \
+        "timers" || true)
+
+    if [[ -n "${safe_skills}" ]]; then
+        printf '\nEnable moderate skills? (read local data)\n'
+        moderate_skills=$(gum choose --no-limit \
+            "file-search" \
+            "doc-summary" \
+            "log-viewer" || true)
+    fi
+
+    if [[ -n "${moderate_skills}" ]]; then
+        printf '\nEnable elevated skills? (execute on host, sandboxed)\n'
+        elevated_skills=$(gum choose --no-limit \
+            "shell" \
+            "file-management" \
+            "system-monitoring" || true)
+    fi
+
+    # Save enabled skills
+    mkdir -p "${STATE_DIR}/skills"
+    for skill in ${safe_skills} ${moderate_skills:-} ${elevated_skills:-}; do
+        touch "${STATE_DIR}/skills/${skill}.enabled"
+        printf '  Enabled: %s\n' "${skill}"
+    done
+}
+
+# Step 6: Verify & Start
+step_verify() {
+    gum style --bold "Step 6/6: Verify & Start"
+
+    printf '\nRunning health check...\n\n'
+    erinos doctor || true
+
+    printf '\nStarting services...\n'
+    sudo systemctl restart ollama.service
+
+    # Mark onboarding complete
+    mkdir -p "${STATE_DIR}"
+    touch "${STATE_DIR}/onboarded"
+
+    gum style \
+        --border double \
+        --align center \
+        --width 50 \
+        --margin "1 2" \
+        --padding "1 2" \
+        --foreground 2 \
+        "Setup complete!" \
+        "" \
+        "Your AI assistant is running." \
+        "Send it a message to get started." \
+        "" \
+        "Run 'erinos status' to check services." \
+        "Run 'erinos --help' for all commands."
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+main() {
+    check_deps
+    banner
+
+    step_network
+    step_tailscale
+    step_models
+    step_messaging
+    step_skills
+    step_verify
+}
+
+main "$@"

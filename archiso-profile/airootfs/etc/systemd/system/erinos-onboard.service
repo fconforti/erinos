@@ -1,0 +1,15 @@
+[Unit]
+Description=ErinOS first-boot onboarding wizard
+After=multi-user.target
+ConditionPathExists=!/var/lib/erinos/onboarded
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/erinos-onboard
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

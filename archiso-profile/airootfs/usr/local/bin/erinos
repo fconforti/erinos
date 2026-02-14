@@ -1,0 +1,452 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# erinos — CLI entrypoint for ErinOS
+# Dispatches to subcommands defined in /usr/local/lib/erinos/ or handled inline.
+
+VERSION="0.1.0"
+STATE_DIR="/var/lib/erinos"
+LOG_DIR="/var/log"
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+die() { printf 'erinos: %s\n' "$1" >&2; exit 1; }
+
+need_root() {
+    [[ $EUID -eq 0 ]] || die "this command requires root — try: sudo erinos $*"
+}
+
+# ── status ───────────────────────────────────────────────────────────────────
+
+cmd_status() {
+    printf 'ErinOS v%s\n\n' "${VERSION}"
+
+    printf '%-20s %s\n' "Service" "Status"
+    printf '%-20s %s\n' "-------" "------"
+
+    local services=(ollama docker tailscaled)
+    for svc in "${services[@]}"; do
+        local state
+        state=$(systemctl is-active "${svc}.service" 2>/dev/null || true)
+        printf '%-20s %s\n' "${svc}" "${state}"
+    done
+
+    printf '\n'
+
+    # Tailscale status
+    if command -v tailscale &>/dev/null && systemctl is-active tailscaled.service &>/dev/null; then
+        printf 'Tailscale: '
+        tailscale status --self 2>/dev/null | head -1 || printf 'not connected\n'
+    fi
+
+    # Ollama models
+    if command -v ollama &>/dev/null && systemctl is-active ollama.service &>/dev/null; then
+        printf '\nInstalled models:\n'
+        ollama list 2>/dev/null || printf '  (none)\n'
+    fi
+}
+
+# ── doctor ───────────────────────────────────────────────────────────────────
+
+cmd_doctor() {
+    local boot_mode=false
+    local failures=0
+
+    if [[ "${1:-}" == "--boot" ]]; then
+        boot_mode=true
+    fi
+
+    printf 'ErinOS health check\n\n'
+
+    # Check LUKS
+    printf '  LUKS encryption: '
+    if cryptsetup status "$(findmnt -no SOURCE /)" &>/dev/null 2>&1; then
+        printf 'OK\n'
+    else
+        printf 'WARNING — root is not on an encrypted volume\n'
+        ((failures++)) || true
+    fi
+
+    # Check Tailscale
+    printf '  Tailscale:       '
+    if tailscale status &>/dev/null 2>&1; then
+        printf 'OK\n'
+    else
+        printf 'NOT CONNECTED\n'
+        ((failures++)) || true
+    fi
+
+    # Check Docker socket permissions
+    printf '  Docker socket:   '
+    if [[ -S /var/run/docker.sock ]]; then
+        local perms
+        perms=$(stat -c '%a' /var/run/docker.sock 2>/dev/null || echo "unknown")
+        if [[ "${perms}" == "660" ]]; then
+            printf 'OK\n'
+        else
+            printf 'WARNING — permissions are %s (expected 660)\n' "${perms}"
+            ((failures++)) || true
+        fi
+    else
+        printf 'MISSING\n'
+        ((failures++)) || true
+    fi
+
+    # Check OpenClaw state directory
+    printf '  OpenClaw state:  '
+    if [[ -d /home/erin/.openclaw ]]; then
+        local dir_perms
+        dir_perms=$(stat -c '%a' /home/erin/.openclaw 2>/dev/null || echo "unknown")
+        if [[ "${dir_perms}" == "700" ]]; then
+            printf 'OK\n'
+        else
+            printf 'WARNING — permissions are %s (expected 700)\n' "${dir_perms}"
+            ((failures++)) || true
+        fi
+    else
+        printf 'NOT FOUND (OpenClaw not yet configured)\n'
+    fi
+
+    # Check services
+    printf '\n  Services:\n'
+    local services=(ollama docker tailscaled firewalld sshd)
+    for svc in "${services[@]}"; do
+        local state
+        state=$(systemctl is-active "${svc}.service" 2>/dev/null || true)
+        printf '    %-16s %s\n' "${svc}" "${state}"
+        if [[ "${state}" != "active" ]]; then
+            ((failures++)) || true
+        fi
+    done
+
+    # In boot mode, write failures to flag file
+    if [[ "${boot_mode}" == true && ${failures} -gt 0 ]]; then
+        mkdir -p "${STATE_DIR}"
+        {
+            printf 'Boot health check found %d issue(s):\n' "${failures}"
+            printf 'Run "erinos doctor" for details.\n'
+        } > "${STATE_DIR}/boot-health"
+    fi
+
+    printf '\n'
+    if [[ ${failures} -eq 0 ]]; then
+        printf 'All checks passed.\n'
+    else
+        printf '%d issue(s) found.\n' "${failures}"
+        return 1
+    fi
+}
+
+# ── model ────────────────────────────────────────────────────────────────────
+
+cmd_model() {
+    local subcmd="${1:-}"
+    shift || true
+
+    case "${subcmd}" in
+        list)
+            printf 'Installed models:\n'
+            ollama list 2>/dev/null || die "ollama is not running"
+            ;;
+        pull)
+            [[ -n "${1:-}" ]] || die "usage: erinos model pull <name>"
+            ollama pull "$1"
+            ;;
+        use)
+            [[ -n "${1:-}" ]] || die "usage: erinos model use <name>"
+            # Write selected model to OpenClaw config
+            printf 'Setting active model to: %s\n' "$1"
+            mkdir -p "${STATE_DIR}"
+            printf '%s\n' "$1" > "${STATE_DIR}/active-model"
+            printf 'Model updated. Restart OpenClaw to apply: sudo systemctl restart openclaw\n'
+            ;;
+        route)
+            printf 'Model routing configuration\n'
+            printf 'Light model (routine tasks): '
+            if [[ -f "${STATE_DIR}/model-light" ]]; then
+                cat "${STATE_DIR}/model-light"
+            else
+                printf '(not configured)\n'
+            fi
+            printf 'Heavy model (complex tasks): '
+            if [[ -f "${STATE_DIR}/model-heavy" ]]; then
+                cat "${STATE_DIR}/model-heavy"
+            else
+                printf '(not configured)\n'
+            fi
+            printf '\nUse onboarding or edit %s/model-{light,heavy} to configure.\n' "${STATE_DIR}"
+            ;;
+        "")
+            die "usage: erinos model {list|pull|use|route}"
+            ;;
+        *)
+            die "unknown model subcommand: ${subcmd}"
+            ;;
+    esac
+}
+
+# ── skill ────────────────────────────────────────────────────────────────────
+
+cmd_skill() {
+    local subcmd="${1:-}"
+    shift || true
+
+    case "${subcmd}" in
+        list)
+            printf 'Skills:\n\n'
+            local skill_dir="/usr/local/share/erinos/skills"
+            if [[ ! -d "${skill_dir}" ]]; then
+                printf '  No skills installed.\n'
+                return
+            fi
+            for tier in safe moderate elevated; do
+                if [[ -d "${skill_dir}/${tier}" ]]; then
+                    printf '  [%s]\n' "${tier}"
+                    for skill in "${skill_dir}/${tier}"/*/; do
+                        [[ -d "${skill}" ]] || continue
+                        local name
+                        name=$(basename "${skill}")
+                        local enabled="disabled"
+                        if [[ -f "${STATE_DIR}/skills/${name}.enabled" ]]; then
+                            enabled="enabled"
+                        fi
+                        printf '    %-20s %s\n' "${name}" "${enabled}"
+                    done
+                    printf '\n'
+                fi
+            done
+            ;;
+        enable)
+            [[ -n "${1:-}" ]] || die "usage: erinos skill enable <name>"
+            need_root "skill" "enable" "$1"
+            mkdir -p "${STATE_DIR}/skills"
+            touch "${STATE_DIR}/skills/${1}.enabled"
+            printf 'Skill enabled: %s\n' "$1"
+            printf 'Running quick security audit...\n'
+            openclaw security audit 2>/dev/null || true
+            ;;
+        disable)
+            [[ -n "${1:-}" ]] || die "usage: erinos skill disable <name>"
+            need_root "skill" "disable" "$1"
+            rm -f "${STATE_DIR}/skills/${1}.enabled"
+            printf 'Skill disabled: %s\n' "$1"
+            ;;
+        "")
+            die "usage: erinos skill {list|enable|disable}"
+            ;;
+        *)
+            die "unknown skill subcommand: ${subcmd}"
+            ;;
+    esac
+}
+
+# ── channel ──────────────────────────────────────────────────────────────────
+
+cmd_channel() {
+    local subcmd="${1:-}"
+
+    case "${subcmd}" in
+        add)
+            printf 'Channel setup\n\n'
+            printf 'Available channels:\n'
+            printf '  1. Telegram\n'
+            printf '  2. Discord\n'
+            printf '  3. WhatsApp\n'
+            printf '  4. Slack\n'
+            printf '  5. Signal\n'
+            printf '\nUse "erinos-onboard" to configure channels interactively.\n'
+            ;;
+        "")
+            die "usage: erinos channel add"
+            ;;
+        *)
+            die "unknown channel subcommand: ${subcmd}"
+            ;;
+    esac
+}
+
+# ── sandbox ──────────────────────────────────────────────────────────────────
+
+cmd_sandbox() {
+    local subcmd="${1:-}"
+
+    case "${subcmd}" in
+        status)
+            printf 'Docker sandbox status:\n\n'
+            if systemctl is-active docker.service &>/dev/null; then
+                docker info --format '  Storage driver: {{.Driver}}' 2>/dev/null
+                docker info --format '  Running containers: {{.ContainersRunning}}' 2>/dev/null
+                docker info --format '  Images: {{.Images}}' 2>/dev/null
+            else
+                printf '  Docker is not running.\n'
+            fi
+            ;;
+        shell)
+            printf 'Starting sandbox shell...\n'
+            docker run --rm -it \
+                --network none \
+                --read-only \
+                --tmpfs /tmp:rw,size=64m \
+                archlinux:latest /bin/bash
+            ;;
+        "")
+            die "usage: erinos sandbox {status|shell}"
+            ;;
+        *)
+            die "unknown sandbox subcommand: ${subcmd}"
+            ;;
+    esac
+}
+
+# ── update ───────────────────────────────────────────────────────────────────
+
+cmd_update() {
+    need_root "update"
+
+    printf 'ErinOS update\n\n'
+
+    local log_file="${LOG_DIR}/erinos-update.log"
+
+    {
+        printf '=== ErinOS update — %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+        # System packages
+        printf '\n--- pacman ---\n'
+        pacman -Syu --noconfirm
+
+        # Ollama
+        printf '\n--- ollama ---\n'
+        if command -v ollama &>/dev/null; then
+            ollama update 2>/dev/null || printf 'Ollama update not available via CLI, skipping.\n'
+        fi
+
+        # OpenClaw
+        printf '\n--- openclaw ---\n'
+        if command -v openclaw &>/dev/null; then
+            npm update -g openclaw 2>/dev/null || printf 'OpenClaw update skipped.\n'
+        fi
+
+        # Check for kernel update
+        local running_kernel installed_kernel
+        running_kernel=$(uname -r)
+        installed_kernel=$(pacman -Q linux 2>/dev/null | awk '{print $2}' || echo "unknown")
+        if [[ "${running_kernel}" != *"${installed_kernel}"* ]]; then
+            printf '\nKernel updated (%s -> %s). Reboot required.\n' "${running_kernel}" "${installed_kernel}"
+            mkdir -p "${STATE_DIR}"
+            printf 'Kernel updated. Please reboot.\n' > "${STATE_DIR}/reboot-required"
+        fi
+
+        # Post-update security audit
+        printf '\n--- security audit ---\n'
+        if command -v openclaw &>/dev/null; then
+            local audit_output
+            audit_output=$(openclaw security audit --deep 2>&1) || true
+            printf '%s\n' "${audit_output}"
+            if [[ -n "${audit_output}" ]]; then
+                mkdir -p "${STATE_DIR}"
+                printf '%s\n' "${audit_output}" > "${STATE_DIR}/audit-findings"
+            fi
+        else
+            printf 'OpenClaw not installed, skipping audit.\n'
+        fi
+
+        printf '\n=== Update complete ===\n'
+    } 2>&1 | tee -a "${log_file}"
+
+    printf '\nUpdate log: %s\n' "${log_file}"
+}
+
+# ── logs ─────────────────────────────────────────────────────────────────────
+
+cmd_logs() {
+    if [[ "${1:-}" == "--ollama" ]]; then
+        journalctl -u ollama.service -f --no-pager
+    else
+        journalctl -u ollama.service -u docker.service -u tailscaled.service -f --no-pager
+    fi
+}
+
+# ── reset ────────────────────────────────────────────────────────────────────
+
+cmd_reset() {
+    need_root "reset"
+
+    printf 'WARNING: This will factory-reset ErinOS.\n'
+    printf 'All configuration, models, and data will be removed.\n'
+    printf '\n'
+    read -r -p 'Type "RESET" to confirm: ' confirm
+    if [[ "${confirm}" != "RESET" ]]; then
+        printf 'Aborted.\n'
+        return 1
+    fi
+
+    printf '\nResetting...\n'
+
+    # Stop services
+    systemctl stop ollama.service 2>/dev/null || true
+
+    # Remove state
+    rm -rf "${STATE_DIR:?}"/*
+    rm -rf /home/erin/.openclaw
+    rm -rf /home/erin/.ollama
+
+    # Re-enable onboarding
+    systemctl enable erinos-onboard.service
+
+    printf 'Reset complete. Reboot to start onboarding again.\n'
+}
+
+# ── help ─────────────────────────────────────────────────────────────────────
+
+cmd_help() {
+    cat <<'HELP'
+ErinOS — Local-first AI assistant appliance
+
+Usage: erinos <command> [options]
+
+Commands:
+  status              Show service status, models, and channels
+  doctor              Run health checks
+  model list          List installed and available models
+  model pull <name>   Download a model
+  model use <name>    Set the active model
+  model route         Show/configure model routing
+  skill list          List skills and their status
+  skill enable <name> Enable a skill
+  skill disable <name>Disable a skill
+  channel add         Connect a messaging channel
+  sandbox status      Show Docker sandbox state
+  sandbox shell       Open a shell in the sandbox
+  update              Update system, OpenClaw, and Ollama
+  logs [--ollama]     Tail service logs
+  reset               Factory reset
+
+Options:
+  -h, --help          Show this help
+  -v, --version       Show version
+HELP
+}
+
+# ── Main dispatch ────────────────────────────────────────────────────────────
+
+main() {
+    local cmd="${1:-}"
+    shift || true
+
+    case "${cmd}" in
+        status)         cmd_status "$@" ;;
+        doctor)         cmd_doctor "$@" ;;
+        model)          cmd_model "$@" ;;
+        skill)          cmd_skill "$@" ;;
+        channel)        cmd_channel "$@" ;;
+        sandbox)        cmd_sandbox "$@" ;;
+        update)         cmd_update "$@" ;;
+        logs)           cmd_logs "$@" ;;
+        reset)          cmd_reset "$@" ;;
+        -v|--version)   printf 'erinos %s\n' "${VERSION}" ;;
+        -h|--help|"")   cmd_help ;;
+        *)              die "unknown command: ${cmd}. Run 'erinos --help' for usage." ;;
+    esac
+}
+
+main "$@"

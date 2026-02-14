@@ -1,0 +1,53 @@
+# ErinOS package list for archiso
+# Base system
+base
+linux
+linux-firmware
+grub
+efibootmgr
+mkinitcpio
+
+# Filesystem and encryption
+dosfstools
+e2fsprogs
+cryptsetup
+lvm2
+
+# Networking
+networkmanager
+firewalld
+tailscale
+
+# DNS
+systemd-resolved
+
+# SSH
+openssh
+
+# Runtime
+nodejs-lts-iron
+npm
+docker
+
+# AI
+ollama
+
+# Onboarding TUI
+gum
+qrencode
+
+# Utilities
+htop
+tmux
+neovim
+git
+curl
+wget
+jq
+man-db
+man-pages
+bash-completion
+
+# Hardware detection
+pciutils
+lshw
