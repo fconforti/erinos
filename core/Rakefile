@@ -5,7 +5,7 @@ require_relative "config/application"
 namespace :db do
   desc "Drop the database"
   task :drop do
-    db_path = File.expand_path("db/erinos.sqlite3", __dir__)
+    db_path = File.expand_path("db/data/erinos.sqlite3", __dir__)
     FileUtils.rm_f(db_path)
     FileUtils.rm_f("#{db_path}-shm")
     FileUtils.rm_f("#{db_path}-wal")

@@ -26,6 +26,9 @@ channels/
 # Start all services
 docker compose up -d
 
+# Sign in to Ollama for cloud models (first time only)
+docker compose exec ollama ollama login
+
 # Wait for core to be healthy, then use the CLI
 erin agents default
 erin models list

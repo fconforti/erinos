@@ -8,12 +8,16 @@ require_relative "api/models"
 require_relative "api/agents"
 require_relative "api/tools"
 require_relative "api/agent_tools"
+require_relative "api/conversations"
+require_relative "api/messages"
 
 class API < Sinatra::Base
   set :bind, "0.0.0.0"
 
   before { content_type :json }
 
+  use MessagesAPI
+  use ConversationsAPI
   use AgentToolsAPI
   use AgentsAPI
   use ModelsAPI

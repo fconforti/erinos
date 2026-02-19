@@ -11,7 +11,7 @@ services:
     environment:
       RACK_ENV: production
     volumes:
-      - erin-db:/app/db
+      - erin-db:/app/db/data
     depends_on:
       ollama-init:
         condition: service_completed_successfully # Wait for model pull

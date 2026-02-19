@@ -2,6 +2,8 @@
 
 require "faraday"
 require "json"
+require "net/http"
+require "uri"
 
 class CoreClient
   def initialize
@@ -26,6 +28,43 @@ class CoreClient
   def patch(path, body)
     handle(@conn.patch(path, body))
   rescue Faraday::ConnectionFailed
+    connection_error
+  end
+
+  def post_sse(path, body, &on_event)
+    url = "#{@conn.url_prefix}#{path}"
+    uri = URI(url)
+
+    Net::HTTP.start(uri.host, uri.port) do |http|
+      request = Net::HTTP::Post.new(uri)
+      request["Content-Type"] = "application/json"
+      request["Accept"] = "text/event-stream"
+      request.body = JSON.generate(body)
+
+      http.request(request) do |response|
+        unless response.code.start_with?("2")
+          body = parse_json(response.body)
+          msg = body.is_a?(Hash) && body["error"] || "request failed (#{response.code})"
+          warn "\e[31mError: #{msg}\e[0m"
+          exit 1
+        end
+
+        buffer = +""
+        response.read_body do |chunk|
+          buffer << chunk
+          while (idx = buffer.index("\n\n"))
+            frame = buffer.slice!(0, idx + 2)
+            frame.each_line do |line|
+              if line.start_with?("data: ")
+                data = parse_json(line.sub("data: ", "").strip)
+                on_event.call(data) if data
+              end
+            end
+          end
+        end
+      end
+    end
+  rescue Errno::ECONNREFUSED, SocketError
     connection_error
   end
 

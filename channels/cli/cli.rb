@@ -5,8 +5,12 @@ require_relative "core_client"
 require_relative "commands/models"
 require_relative "commands/agents"
 require_relative "commands/tools"
+require_relative "commands/chat"
 
 class Erin < Thor
+  desc "chat", "Start an interactive chat with Erin"
+  subcommand "chat", Commands::Chat
+
   desc "models SUBCOMMAND", "Manage models"
   subcommand "models", Commands::Models
 
