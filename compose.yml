@@ -1,0 +1,56 @@
+volumes:
+  erin-db:    # SQLite database, used by core only
+  ollama-data: # Persists downloaded models across restarts
+
+services:
+  # Main application service
+  core:
+    build: ./core
+    ports:
+      - "4567:4567"
+    environment:
+      RACK_ENV: production
+    volumes:
+      - erin-db:/app/db
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully # Wait for model pull
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4567/health"]
+      interval: 3s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+  # LLM inference server
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434" # Exposed to host for debugging
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # One-shot: pulls the model then exits
+  ollama-init:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama # Point CLI at the ollama service, not localhost
+    entrypoint: ["ollama", "pull", "gpt-oss:120b-cloud"]
+    restart: "no"
+
+  # Management CLI — run ad-hoc, not with `docker compose up`
+  cli:
+    build: ./channels/cli
+    environment:
+      CORE_URL: http://core:4567
+    profiles:
+      - cli

@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gem "activerecord", require: "active_record"
+gem "sqlite3"
+gem "ruby_llm"
+gem "sinatra", require: "sinatra/base"
+gem "rackup"
+gem "puma"
+gem "rake"
+gem "irb"
+gem "zeitwerk"
