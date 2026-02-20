@@ -1,6 +1,6 @@
-# Erin CLI
+# CLI Channel
 
-Management CLI for ErinOS Core. Manage models, agents, and tools from the terminal.
+Management CLI and interactive chat for ErinOS. Built with Thor, runs as an ad-hoc Docker container.
 
 ## Setup
 
@@ -28,7 +28,26 @@ docker compose up -d core
 
 If Core is unreachable, the CLI prints an error and exits.
 
+## Identity
+
+The CLI sends a fixed dev identity on every request:
+
+- **Provider:** `cli`
+- **UID:** `dev`
+- **Name:** `Developer`
+
+This identity is seeded as an admin user by `rake db:seed`.
+
 ## Commands
+
+### Chat
+
+```bash
+erin chat                           # Chat with the default agent
+erin chat --agent-id 2              # Chat with a specific agent
+```
+
+Interactive session. Type messages and get streaming responses. Type `exit` or `quit` to end.
 
 ### Models
 
@@ -53,10 +72,10 @@ erin agents update 1 --name "New Name"
 erin agents delete 1
 ```
 
-Agent-tool assignments:
+Agent–tool assignments:
 
 ```bash
-erin agents tools 1              # list tools assigned to agent 1
+erin agents tools 1                 # List tools assigned to agent 1
 erin agents assign-tool 1 --tool-id 2
 erin agents remove-tool 1 --tool-id 2
 ```
@@ -79,17 +98,18 @@ erin models help
 erin agents help create
 ```
 
-## Architecture
+## File layout
 
 ```
-channels/cli/
-  cli.rb              # Entry point — Erin < Thor, dispatches subcommands
-  core_client.rb      # Faraday HTTP client, talks to Core API
-  commands/
-    base.rb           # Shared base class (client, output helpers)
-    models.rb         # Models subcommand
-    agents.rb         # Agents subcommand (includes tool assignments)
-    tools.rb          # Tools subcommand
+cli.rb              Entry point — Erin < Thor, dispatches subcommands
+Dockerfile          Ruby 3.4 Alpine image
+Gemfile             Dependencies: thor, erinos-client
+commands/
+  base.rb           Shared base class (client, output helpers)
+  chat.rb           Interactive chat with SSE streaming
+  models.rb         Models subcommand
+  agents.rb         Agents subcommand (includes tool assignments)
+  tools.rb          Tools subcommand
 ```
 
 The CLI runs as an ad-hoc Docker container (`profiles: [cli]`) and talks to Core over the internal Docker network. It is not started by `docker compose up`.
