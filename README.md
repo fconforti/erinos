@@ -57,6 +57,27 @@ alias erin='docker compose -f /path/to/erinos/compose.yml run --rm cli'
 
 Then reload your shell. See [channels/cli/README.md](channels/cli/README.md) for the full command reference.
 
+## Telegram Setup
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram
+2. Send `/newbot` and follow the prompts to choose a name and username
+3. Copy the API token BotFather gives you
+4. Add it to your `.env` file:
+
+```
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
+```
+
+5. Start (or restart) the services:
+
+```bash
+docker compose up -d
+```
+
+The bot will start listening automatically. Send `/start` to begin a new conversation, then message normally to chat.
+
+If you already have a bot, send `/mybots` to @BotFather, select your bot, and tap **API Token** to reveal it.
+
 ## Development
 
 Core must be running for the CLI to work:
