@@ -17,7 +17,7 @@ class ChatService
     chat = @context.chat(model: @model.name, provider: @model.provider.to_sym, assume_model_exists: true)
     chat.with_instructions(@agent.instructions)
 
-    tool_context = { timezone: @conversation.user.timezone }
+    tool_context = { timezone: @conversation.user.timezone, email: @conversation.user.email }
     @agent.agent_tools.pluck(:tool).each { |name| chat.with_tool(TOOL_CATALOG.fetch(name).new(**tool_context)) }
 
     @conversation.messages.order(:created_at).each do |msg|

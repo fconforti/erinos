@@ -105,6 +105,25 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       rescue ErinosClient::Error => e
         send_text(bot, chat_id, "Error: #{e.message}")
       end
+    when %r{^/email\s+(\S+)}
+      address = $1
+      begin
+        client_for(message.from, clients).patch("/users/me", { email: address })
+        send_text(bot, chat_id, "Email set to #{address}.")
+      rescue ErinosClient::Error => e
+        send_text(bot, chat_id, "Error: #{e.message}")
+      end
+    when "/email"
+      begin
+        result = client_for(message.from, clients).get("/users/me")
+        if result["email"]
+          send_text(bot, chat_id, "Your email: #{result['email']}")
+        else
+          send_text(bot, chat_id, "No email set. Use: /email you@example.com")
+        end
+      rescue ErinosClient::Error => e
+        send_text(bot, chat_id, "Error: #{e.message}")
+      end
     else
       begin
         cl = client_for(message.from, clients)

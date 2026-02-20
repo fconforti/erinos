@@ -10,6 +10,11 @@ services:
       - "4567:4567"
     environment:
       RACK_ENV: production
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-erin@localhost}
     volumes:
       - erin-db:/app/db/data
     depends_on:
@@ -46,6 +51,13 @@ services:
       - OLLAMA_HOST=ollama # Point CLI at the ollama service, not localhost
     entrypoint: ["ollama", "pull", "gpt-oss:120b-cloud"]
     restart: "no"
+
+  # Local SMTP — catches all outgoing emails, web UI at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
 
   # Management CLI — run ad-hoc, not with `docker compose up`
   cli:

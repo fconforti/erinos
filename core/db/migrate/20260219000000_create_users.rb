@@ -6,6 +6,7 @@ class CreateUsers < ActiveRecord::Migration[8.0]
       t.string :name
       t.string :role, null: false, default: "user"
       t.string :timezone, null: false, default: "UTC"
+      t.string :email
       t.timestamps
     end
   end
