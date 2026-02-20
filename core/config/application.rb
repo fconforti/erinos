@@ -4,7 +4,6 @@ require "bundler/setup"
 Bundler.require
 
 loader = Zeitwerk::Loader.new
-loader.push_dir(File.expand_path("../agents", __dir__))
 loader.push_dir(File.expand_path("../entities", __dir__))
 loader.push_dir(File.expand_path("../services", __dir__))
 loader.setup
