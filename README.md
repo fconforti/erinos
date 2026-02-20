@@ -4,46 +4,7 @@ Local-first AI assistant powered by Ollama. Runs as a set of Docker containers: 
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Docker Compose                           │
-│                                                                 │
-│   ┌──────────┐     ┌──────────┐     ┌────────────────────────┐  │
-│   │   CLI    │     │ Telegram │     │ (future: Tailscale,    │  │
-│   │ channel  │     │ channel  │     │  web, Matrix, …)       │  │
-│   └────┬─────┘     └────┬─────┘     └────────────┬───────────┘  │
-│        │                │                        │              │
-│        │  X-Identity-*  │   X-Identity-*         │              │
-│        ▼                ▼                        ▼              │
-│   ┌─────────────────────────────────────────────────────────┐   │
-│   │                     Core API (:4567)                    │   │
-│   │  ┌──────────┐  ┌──────────┐  ┌────────┐  ┌──────────┐  │   │
-│   │  │ Convers. │  │ Messages │  │ Agents │  │ Models   │  │   │
-│   │  │   API    │  │   API    │  │  API   │  │  API     │  │   │
-│   │  └────┬─────┘  └────┬─────┘  └────────┘  └──────────┘  │   │
-│   │       │              │                                  │   │
-│   │       └──────┬───────┘                                  │   │
-│   │              ▼                                          │   │
-│   │  ┌────────────────────┐  ┌──────────────────────────┐   │   │
-│   │  │      Gateway       │  │    Identity resolution   │   │   │
-│   │  └────────┬───────────┘  │   (current_user helper)  │   │   │
-│   │           │              └──────────────────────────┘   │   │
-│   │           ▼                                             │   │
-│   │  ┌────────────────────┐                                 │   │
-│   │  │    ChatService     │──────────────── RubyLLM         │   │
-│   │  └────────┬───────────┘                                 │   │
-│   │           │                                             │   │
-│   │           ▼                                             │   │
-│   │        SQLite                                           │   │
-│   └─────────────────────────────────────────────────────────┘   │
-│                           │                                     │
-│                           ▼                                     │
-│                    ┌─────────────┐                               │
-│                    │   Ollama    │                               │
-│                    │  (:11434)   │                               │
-│                    └─────────────┘                               │
-└─────────────────────────────────────────────────────────────────┘
-```
+The system is composed of five Docker services. Channels (CLI, Telegram) send HTTP requests to Core, which resolves the caller's identity, routes through the Gateway, and delegates to ChatService for LLM interactions via Ollama. All state lives in a single SQLite database.
 
 ### Services
 
@@ -157,15 +118,7 @@ Handles the actual LLM interaction:
 
 ### Schema
 
-```
-models        1 ←──── * agents        1 ←──── * conversations 1 ←──── * messages
-                         │                        │
-                         * agent_tools *           │
-                         │                        │
-tools         1 ←────────┘              users   1 ←┘
-                                          │
-                                          * identities
-```
+A **model** has many **agents**. An agent has many **tools** through the **agent_tools** join table. An agent has many **conversations**, and each conversation belongs to a **user**. A conversation has many **messages**. A user has many **identities** (one per provider).
 
 Key constraints:
 - `identities` has a unique index on `[provider, uid]` — one identity per provider per person.
