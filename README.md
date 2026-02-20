@@ -7,8 +7,11 @@ Local-first AI assistant powered by Ollama. Runs as a set of Docker containers: 
 ```
 compose.yml          # Orchestrates all services
 core/                # Sinatra API — models, agents, tools (SQLite)
+gems/
+  erinos-client/     # Shared HTTP client gem for Core API
 channels/
   cli/               # Thor CLI — management commands via `erin`
+  telegram/          # Telegram bot — streaming chat
 ```
 
 ### Services
@@ -19,10 +22,14 @@ channels/
 | **ollama**    | LLM inference server (port 11434)       | Yes             |
 | **ollama-init** | One-shot model pull, then exits       | Yes             |
 | **cli**       | Management CLI (`erin`), runs ad-hoc    | No (profiled)   |
+| **telegram**  | Telegram bot (streaming chat)           | Yes             |
 
 ## Quick Start
 
 ```bash
+# Set your Telegram bot token in .env
+# TELEGRAM_BOT_TOKEN=your-token-from-botfather
+
 # Start all services
 docker compose up -d
 
@@ -71,8 +78,13 @@ core/
   db/seeds.rb                 # Default agent + model seed
   config/application.rb       # Bundler, Zeitwerk, DB connection
 
+gems/erinos-client/
+  lib/erinos_client.rb        # Shared Faraday HTTP client for Core API
+
 channels/cli/
   cli.rb                      # Entry point (Erin < Thor)
-  core_client.rb              # Faraday HTTP client for Core API
-  commands/                   # Thor subcommands (models, agents, tools)
+  commands/                   # Thor subcommands (models, agents, tools, chat)
+
+channels/telegram/
+  bot.rb                      # Telegram bot entry point (streaming chat)
 ```

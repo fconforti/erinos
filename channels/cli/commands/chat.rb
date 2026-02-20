@@ -47,7 +47,7 @@ module Commands
         elsif data["content"]
           $stdout.write data["content"]
         elsif data["error"]
-          $stdout.write "\n\e[31mError: #{data["error"]}\e[0m\n\n"
+          warn "\n\e[31mError: #{data["error"]}\e[0m\n"
         end
       end
     end

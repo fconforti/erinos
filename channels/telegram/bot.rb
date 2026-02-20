@@ -1,0 +1,101 @@
+# frozen_string_literal: true
+
+$stdout.sync = true
+
+require "telegram/bot"
+require "erinos_client"
+require "logger"
+
+LOGGER = Logger.new($stdout, progname: "telegram-bot")
+TOKEN  = ENV.fetch("TELEGRAM_BOT_TOKEN")
+
+client        = ErinosClient.new
+conversations = {} # chat_id → conversation_id
+
+# Minimum seconds between message edits (Telegram rate limit).
+EDIT_INTERVAL = 1.0
+
+def send_text(bot, chat_id, text)
+  bot.api.send_message(chat_id: chat_id, text: text)
+end
+
+def ensure_conversation(client, conversations, chat_id)
+  return conversations[chat_id] if conversations.key?(chat_id)
+
+  conv = client.post("/conversations", {})
+  conversations[chat_id] = conv["id"]
+end
+
+def stream_response(bot, client, chat_id, conversation_id, text)
+  bot.api.send_chat_action(chat_id: chat_id, action: "typing")
+
+  message_id   = nil
+  buffer       = +""
+  last_edit_at = 0.0
+
+  client.post_sse("/conversations/#{conversation_id}/messages", { content: text }) do |data|
+    if data["content"]
+      buffer << data["content"]
+
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if !buffer.empty? && now - last_edit_at >= EDIT_INTERVAL
+        if message_id
+          bot.api.edit_message_text(chat_id: chat_id, message_id: message_id, text: buffer)
+        else
+          msg = bot.api.send_message(chat_id: chat_id, text: buffer)
+          message_id = msg.message_id
+        end
+        last_edit_at = now
+      end
+    elsif data["error"]
+      buffer << "\n\nError: #{data["error"]}"
+    end
+  end
+
+  # Final update with complete text
+  if message_id
+    bot.api.edit_message_text(chat_id: chat_id, message_id: message_id, text: buffer)
+  elsif buffer.empty?
+    send_text(bot, chat_id, "(empty response)")
+  else
+    send_text(bot, chat_id, buffer)
+  end
+rescue ErinosClient::Error => e
+  LOGGER.error("Core error: #{e.message}")
+  if message_id
+    bot.api.edit_message_text(chat_id: chat_id, message_id: message_id, text: "Error: #{e.message}")
+  else
+    send_text(bot, chat_id, "Error: #{e.message}")
+  end
+rescue Telegram::Bot::Exceptions::ResponseError => e
+  LOGGER.error("Telegram API error: #{e.message}")
+end
+
+LOGGER.info("Starting bot...")
+
+Telegram::Bot::Client.run(TOKEN) do |bot|
+  bot.listen do |message|
+    next unless message.is_a?(Telegram::Bot::Types::Message) && message.text
+
+    chat_id = message.chat.id
+
+    case message.text
+    when "/start", "/new"
+      conversations.delete(chat_id)
+      conv = client.post("/conversations", {})
+      conversations[chat_id] = conv["id"]
+      send_text(bot, chat_id, "New conversation started.")
+    else
+      begin
+        conversation_id = ensure_conversation(client, conversations, chat_id)
+        stream_response(bot, client, chat_id, conversation_id, message.text)
+      rescue ErinosClient::Error => e
+        LOGGER.error("Core error: #{e.message}")
+        send_text(bot, chat_id, "Error: #{e.message}")
+      rescue StandardError => e
+        LOGGER.error("Unexpected error: #{e.class} — #{e.message}")
+        send_text(bot, chat_id, "Something went wrong. Please try again.")
+      end
+    end
+  end
+end

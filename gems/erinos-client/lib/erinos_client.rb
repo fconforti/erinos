@@ -5,9 +5,11 @@ require "json"
 require "net/http"
 require "uri"
 
-class CoreClient
-  def initialize
-    @conn = Faraday.new(url: ENV.fetch("CORE_URL", "http://core:4567")) do |f|
+class ErinosClient
+  class Error < StandardError; end
+
+  def initialize(url: ENV.fetch("CORE_URL", "http://core:4567"))
+    @conn = Faraday.new(url: url) do |f|
       f.request :json
       f.adapter Faraday.default_adapter
     end
@@ -45,8 +47,7 @@ class CoreClient
         unless response.code.start_with?("2")
           body = parse_json(response.body)
           msg = body.is_a?(Hash) && body["error"] || "request failed (#{response.code})"
-          warn "\e[31mError: #{msg}\e[0m"
-          exit 1
+          raise Error, msg
         end
 
         buffer = +""
@@ -92,13 +93,11 @@ class CoreClient
             "request failed (#{resp.status})"
           end
 
-    warn "\e[31mError: #{msg}\e[0m"
-    exit 1
+    raise Error, msg
   end
 
   def connection_error
-    warn "\e[31mError: cannot reach core at #{@conn.url_prefix}\e[0m"
-    exit 1
+    raise Error, "cannot reach core at #{@conn.url_prefix}"
   end
 
   def parse_json(raw)
@@ -106,7 +105,6 @@ class CoreClient
 
     JSON.parse(raw)
   rescue JSON::ParserError
-    warn "\e[31mError: unexpected response from core — #{raw[0, 120]}\e[0m"
-    exit 1
+    raise Error, "unexpected response from core — #{raw[0, 120]}"
   end
 end

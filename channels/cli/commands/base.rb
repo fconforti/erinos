@@ -4,10 +4,19 @@ require "thor"
 
 module Commands
   class Base < Thor
+    no_commands do
+      def invoke_command(command, *args)
+        super
+      rescue ErinosClient::Error => e
+        warn "\e[31mError: #{e.message}\e[0m"
+        exit 1
+      end
+    end
+
     private
 
     def client
-      @client ||= CoreClient.new
+      @client ||= ErinosClient.new
     end
 
     def field(label, value)

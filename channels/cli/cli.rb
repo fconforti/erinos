@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "thor"
-require_relative "core_client"
+require "erinos_client"
 require_relative "commands/models"
 require_relative "commands/agents"
 require_relative "commands/tools"

@@ -1,0 +1,6 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gem "erinos-client",     path: "../../gems/erinos-client"
+gem "telegram-bot-ruby", "~> 2.5"
