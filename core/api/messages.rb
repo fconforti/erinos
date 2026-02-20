@@ -14,7 +14,7 @@ class MessagesAPI < BaseAPI
     content_type "text/event-stream"
     stream(:keep_open) do |out|
       begin
-        gateway = Gateway.new
+        gateway = Gateway.new(current_user)
         message = gateway.reply(conversation, body[:content]) do |chunk|
           out << "data: #{JSON.generate(content: chunk.content)}\n\n" if chunk.content
         end
@@ -30,7 +30,7 @@ class MessagesAPI < BaseAPI
   private
 
   def find_conversation!
-    Conversation.find(params[:conversation_id])
+    current_user.conversations.find(params[:conversation_id])
   rescue ActiveRecord::RecordNotFound
     halt 404, { error: "not found" }.to_json
   end

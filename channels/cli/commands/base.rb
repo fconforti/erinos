@@ -16,7 +16,11 @@ module Commands
     private
 
     def client
-      @client ||= ErinosClient.new
+      @client ||= ErinosClient.new(headers: {
+        "X-Identity-Provider" => "cli",
+        "X-Identity-UID" => "dev",
+        "X-Identity-Name" => "Developer"
+      })
     end
 
     def field(label, value)

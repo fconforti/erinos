@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
 class Gateway
+  def initialize(user)
+    @user = user
+  end
+
   def create_conversation(agent_id: nil)
     agent = agent_id ? Agent.find(agent_id) : Agent.find_by!(default: true)
-    Conversation.create!(agent: agent)
+    @user.conversations.create!(agent: agent)
   end
 
   def reply(conversation, content, &on_chunk)

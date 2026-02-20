@@ -9,8 +9,16 @@ require "logger"
 LOGGER = Logger.new($stdout, progname: "telegram-bot")
 TOKEN  = ENV.fetch("TELEGRAM_BOT_TOKEN")
 
-client        = ErinosClient.new
+clients       = {} # user_id → ErinosClient
 conversations = {} # chat_id → conversation_id
+
+def client_for(from, clients)
+  clients[from.id] ||= ErinosClient.new(headers: {
+    "X-Identity-Provider" => "telegram",
+    "X-Identity-UID" => from.id.to_s,
+    "X-Identity-Name" => [from.first_name, from.last_name].compact.join(" ")
+  })
+end
 
 # Minimum seconds between message edits (Telegram rate limit).
 EDIT_INTERVAL = 1.0
@@ -82,13 +90,14 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
     case message.text
     when "/start", "/new"
       conversations.delete(chat_id)
-      conv = client.post("/conversations", {})
+      conv = client_for(message.from, clients).post("/conversations", {})
       conversations[chat_id] = conv["id"]
       send_text(bot, chat_id, "New conversation started.")
     else
       begin
-        conversation_id = ensure_conversation(client, conversations, chat_id)
-        stream_response(bot, client, chat_id, conversation_id, message.text)
+        cl = client_for(message.from, clients)
+        conversation_id = ensure_conversation(cl, conversations, chat_id)
+        stream_response(bot, cl, chat_id, conversation_id, message.text)
       rescue ErinosClient::Error => e
         LOGGER.error("Core error: #{e.message}")
         send_text(bot, chat_id, "Error: #{e.message}")

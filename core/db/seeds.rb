@@ -14,3 +14,11 @@ Agent.find_or_create_by(name: "Erin") do |a|
   a.instructions = ERIN_INSTRUCTIONS
   a.default = true
 end
+
+dev_user = User.find_or_create_by(name: "Developer") do |u|
+  u.role = "admin"
+end
+
+Identity.find_or_create_by(provider: "cli", uid: "dev") do |i|
+  i.user = dev_user
+end

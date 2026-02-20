@@ -5,6 +5,22 @@ class BaseAPI < Sinatra::Base
 
   private
 
+  def current_user
+    provider = request.env["HTTP_X_IDENTITY_PROVIDER"]
+    uid = request.env["HTTP_X_IDENTITY_UID"]
+    halt 401, { error: "unauthorized" }.to_json unless provider && uid
+
+    identity = Identity.find_or_initialize_by(provider: provider, uid: uid)
+    unless identity.persisted?
+      name = request.env["HTTP_X_IDENTITY_NAME"]
+      user = User.create!(name: name, role: User.count.zero? ? "admin" : "user")
+      identity.user = user
+      identity.save!
+    end
+
+    identity.user
+  end
+
   def json_body
     body = request.body.read
     halt 400, { error: "bad request" }.to_json if body.empty?

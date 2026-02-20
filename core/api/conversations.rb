@@ -2,7 +2,7 @@
 
 class ConversationsAPI < BaseAPI
   post "/conversations" do
-    conversation = Gateway.new.create_conversation(agent_id: json_body[:agent_id])
+    conversation = Gateway.new(current_user).create_conversation(agent_id: json_body[:agent_id])
     [201, serialize(conversation).to_json]
   rescue ActiveRecord::RecordNotFound
     halt 404, { error: "agent not found" }.to_json
@@ -23,13 +23,13 @@ class ConversationsAPI < BaseAPI
   private
 
   def find_conversation!
-    Conversation.find(params[:id])
+    current_user.conversations.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     halt 404, { error: "not found" }.to_json
   end
 
   def serialize(conversation)
-    { id: conversation.id, agent_id: conversation.agent_id,
+    { id: conversation.id, agent_id: conversation.agent_id, user_id: conversation.user_id,
       created_at: conversation.created_at, updated_at: conversation.updated_at }
   end
 

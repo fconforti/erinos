@@ -8,9 +8,11 @@ require "uri"
 class ErinosClient
   class Error < StandardError; end
 
-  def initialize(url: ENV.fetch("CORE_URL", "http://core:4567"))
+  def initialize(url: ENV.fetch("CORE_URL", "http://core:4567"), headers: {})
+    @headers = headers
     @conn = Faraday.new(url: url) do |f|
       f.request :json
+      f.headers.merge!(headers)
       f.adapter Faraday.default_adapter
     end
   end
@@ -41,6 +43,7 @@ class ErinosClient
       request = Net::HTTP::Post.new(uri)
       request["Content-Type"] = "application/json"
       request["Accept"] = "text/event-stream"
+      @headers.each { |k, v| request[k] = v }
       request.body = JSON.generate(body)
 
       http.request(request) do |response|
