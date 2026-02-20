@@ -14,8 +14,8 @@ class MessagesAPI < BaseAPI
     content_type "text/event-stream"
     stream(:keep_open) do |out|
       begin
-        service = ChatService.new(conversation)
-        message = service.reply(body[:content]) do |chunk|
+        gateway = Gateway.new
+        message = gateway.reply(conversation, body[:content]) do |chunk|
           out << "data: #{JSON.generate(content: chunk.content)}\n\n" if chunk.content
         end
         out << "data: #{JSON.generate(content: "", done: true, message: serialize(message))}\n\n"
