@@ -93,6 +93,17 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
       conv = client_for(message.from, clients).post("/conversations", {})
       conversations[chat_id] = conv["id"]
       send_text(bot, chat_id, "New conversation started.")
+    when "/link"
+      result = client_for(message.from, clients).post("/identity-links", {})
+      send_text(bot, chat_id, "Link code: #{result['code']}\nEnter this from another channel within 5 minutes.")
+    when %r{^/claim\s+(\S+)}
+      code = $1
+      begin
+        client_for(message.from, clients).patch("/identity-links/#{code}", {})
+        send_text(bot, chat_id, "Identity linked successfully.")
+      rescue ErinosClient::Error => e
+        send_text(bot, chat_id, "Error: #{e.message}")
+      end
     else
       begin
         cl = client_for(message.from, clients)

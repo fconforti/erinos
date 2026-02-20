@@ -65,6 +65,7 @@ docker compose run --rm cli chat
 docker compose up -d              # Start core + ollama
 docker compose up -d --build      # Rebuild and start
 docker compose exec core rake db:reset    # Drop, migrate, seed
+docker compose restart core               # Required after db:reset (Puma holds a stale SQLite fd)
 docker compose run core rake console      # Rails-style console
 docker compose logs -f core               # Tail core logs
 ```

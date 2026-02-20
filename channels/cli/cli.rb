@@ -5,6 +5,7 @@ require "erinos_client"
 require_relative "commands/models"
 require_relative "commands/agents"
 require_relative "commands/tools"
+require_relative "commands/users"
 require_relative "commands/chat"
 
 class Erin < Thor
@@ -19,6 +20,9 @@ class Erin < Thor
 
   desc "tools SUBCOMMAND", "Manage tools"
   subcommand "tools", Commands::Tools
+
+  desc "users SUBCOMMAND", "Manage user identity linking"
+  subcommand "users", Commands::Users
 end
 
 $PROGRAM_NAME = "erin"
