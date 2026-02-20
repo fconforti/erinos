@@ -81,21 +81,21 @@ module Commands
         return
       end
 
-      print_list(%w[ID Name], rows.map { |t| [t["id"], t["name"]] })
+      print_list(%w[Tool], rows.map { |t| [t["tool"]] })
     end
 
     desc "assign-tool ID", "Assign a tool to an agent"
-    method_option :tool_id, required: true, type: :numeric
+    method_option :tool, required: true, type: :string
     def assign_tool(id)
-      client.post("/agents/#{id}/tools", { tool_id: options[:tool_id] })
-      say "Assigned tool #{options[:tool_id]} to agent #{id}.", :green
+      client.post("/agents/#{id}/tools", { tool: options[:tool] })
+      say "Assigned tool #{options[:tool]} to agent #{id}.", :green
     end
 
     desc "remove-tool ID", "Remove a tool from an agent"
-    method_option :tool_id, required: true, type: :numeric
+    method_option :tool, required: true, type: :string
     def remove_tool(id)
-      client.delete("/agents/#{id}/tools/#{options[:tool_id]}")
-      say "Removed tool #{options[:tool_id]} from agent #{id}.", :green
+      client.delete("/agents/#{id}/tools/#{options[:tool]}")
+      say "Removed tool #{options[:tool]} from agent #{id}.", :green
     end
 
     private
@@ -109,8 +109,7 @@ module Commands
       field "Created",      a["created_at"]
       field "Updated",      a["updated_at"]
       if a["tools"] && !a["tools"].empty?
-        tool_names = a["tools"].map { |t| "#{t["name"]} (#{t["id"]})" }.join(", ")
-        field "Tools", tool_names
+        field "Tools", a["tools"].map { |t| t["name"] }.join(", ")
       end
     end
   end

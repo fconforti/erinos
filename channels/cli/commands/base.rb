@@ -19,8 +19,15 @@ module Commands
       @client ||= ErinosClient.new(headers: {
         "X-Identity-Provider" => "cli",
         "X-Identity-UID" => "dev",
-        "X-Identity-Name" => "Developer"
+        "X-Identity-Name" => "Developer",
+        "X-Identity-Timezone" => system_timezone
       })
+    end
+
+    def system_timezone
+      ENV["TZ"] || File.readlink("/etc/localtime").sub(%r{.*/zoneinfo/}, "")
+    rescue StandardError
+      "UTC"
     end
 
     def field(label, value)

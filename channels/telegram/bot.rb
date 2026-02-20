@@ -16,7 +16,8 @@ def client_for(from, clients)
   clients[from.id] ||= ErinosClient.new(headers: {
     "X-Identity-Provider" => "telegram",
     "X-Identity-UID" => from.id.to_s,
-    "X-Identity-Name" => [from.first_name, from.last_name].compact.join(" ")
+    "X-Identity-Name" => [from.first_name, from.last_name].compact.join(" "),
+    "X-Identity-Timezone" => "UTC"
   })
 end
 

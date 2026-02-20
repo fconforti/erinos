@@ -1,6 +1,6 @@
 FROM ruby:3.4-alpine
 
-RUN apk add --no-cache build-base sqlite-dev yaml-dev
+RUN apk add --no-cache build-base sqlite-dev yaml-dev tzdata
 
 WORKDIR /app
 

@@ -48,6 +48,6 @@ class AgentsAPI < BaseAPI
   end
 
   def serialize_tools(agent)
-    agent.tools.map { |t| { id: t.id, name: t.name } }
+    agent.agent_tools.pluck(:tool).map { |name| { name: name } }
   end
 end

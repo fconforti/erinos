@@ -9,11 +9,13 @@ model = Model.find_or_create_by(provider: "ollama", name: "gpt-oss:120b-cloud") 
   m.credentials = { "ollama_api_base" => "http://ollama:11434/v1" }
 end
 
-Agent.find_or_create_by(name: "Erin") do |a|
+erin = Agent.find_or_create_by(name: "Erin") do |a|
   a.model = model
   a.instructions = ERIN_INSTRUCTIONS
   a.default = true
 end
+
+AgentTool.find_or_create_by(agent: erin, tool: "current_time")
 
 dev_user = User.find_or_create_by(name: "Developer") do |u|
   u.role = "admin"

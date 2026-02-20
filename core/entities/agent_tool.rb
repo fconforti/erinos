@@ -2,7 +2,7 @@
 
 class AgentTool < ActiveRecord::Base
   belongs_to :agent
-  belongs_to :tool
 
-  validates :agent_id, uniqueness: { scope: :tool_id }
+  validates :tool, presence: true
+  validates :tool, uniqueness: { scope: :agent_id }
 end

@@ -18,7 +18,10 @@ class BaseAPI < Sinatra::Base
       identity.save!
     end
 
-    identity.user
+    user = identity.user
+    tz = request.env["HTTP_X_IDENTITY_TIMEZONE"]
+    user.update!(timezone: tz) if tz && user.timezone != tz
+    user
   end
 
   def json_body
