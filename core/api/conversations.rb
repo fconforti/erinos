@@ -2,13 +2,12 @@
 
 class ConversationsAPI < BaseAPI
   post "/conversations" do
-    agent = if json_body[:agent_id]
-              Agent.find(json_body[:agent_id])
-            else
-              Agent.find_by!(default: true)
-            end
-
-    conversation = Conversation.create!(agent: agent)
+    if json_body[:agent_id]
+      Agent.find(json_body[:agent_id])
+      conversation = Conversation.create!(agent_id: json_body[:agent_id])
+    else
+      conversation = Conversation.create!
+    end
     [201, serialize(conversation).to_json]
   rescue ActiveRecord::RecordNotFound
     halt 404, { error: "agent not found" }.to_json
