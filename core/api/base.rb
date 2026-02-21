@@ -10,7 +10,7 @@ class BaseAPI < Sinatra::Base
     uid = request.env["HTTP_X_IDENTITY_UID"]
     halt 401, { error: "unauthorized" }.to_json unless provider && uid
 
-    identity = Identity.find_or_initialize_by(provider: provider, uid: uid)
+    identity = UserIdentity.find_or_initialize_by(provider: provider, uid: uid)
     unless identity.persisted?
       name = request.env["HTTP_X_IDENTITY_NAME"]
       user = User.create!(name: name, role: User.count.zero? ? "admin" : "user")

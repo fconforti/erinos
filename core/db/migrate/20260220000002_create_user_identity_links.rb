@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-class CreateIdentityLinks < ActiveRecord::Migration[8.0]
+class CreateUserIdentityLinks < ActiveRecord::Migration[8.0]
   def change
-    create_table :identity_links do |t|
+    create_table :user_identity_links do |t|
       t.references :user, null: false, foreign_key: true
       t.string :code, null: false
       t.string :status, null: false, default: "pending"
@@ -10,6 +10,6 @@ class CreateIdentityLinks < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :identity_links, :code, unique: true
+    add_index :user_identity_links, :code, unique: true
   end
 end

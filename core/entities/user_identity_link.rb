@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class IdentityLink < ActiveRecord::Base
+class UserIdentityLink < ActiveRecord::Base
   belongs_to :user
 
   before_validation :set_defaults, on: :create

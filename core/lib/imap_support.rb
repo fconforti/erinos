@@ -10,4 +10,9 @@ module ImapSupport
     imap.login(@config["email"], @config["password"])
     imap
   end
+
+  def find_drafts_folder(imap)
+    drafts = imap.list("", "*")&.find { |m| m.attr.include?(:Drafts) }
+    drafts&.name || "[Gmail]/Drafts"
+  end
 end

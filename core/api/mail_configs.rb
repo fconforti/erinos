@@ -3,7 +3,7 @@
 class MailConfigsAPI < BaseAPI
   get "/users/:user_id/mail-config" do
     user = find_user!
-    config = user.mail_config
+    config = user.user_mail_config
     halt 404, { error: "not configured" }.to_json unless config
     serialize(config)
   end
@@ -11,7 +11,7 @@ class MailConfigsAPI < BaseAPI
   patch "/users/:user_id/mail-config" do
     user = find_user!
     data = json_body
-    config = user.mail_config || user.build_mail_config
+    config = user.user_mail_config || user.build_user_mail_config
     config.assign_attributes(data.slice(:email, :imap_host, :imap_port, :smtp_host, :smtp_port, :password))
     halt 422, { errors: config.errors.full_messages }.to_json unless config.save
     serialize(config)
@@ -19,7 +19,7 @@ class MailConfigsAPI < BaseAPI
 
   delete "/users/:user_id/mail-config" do
     user = find_user!
-    config = user.mail_config
+    config = user.user_mail_config
     halt 404, { error: "not configured" }.to_json unless config
     config.destroy
     [204, ""]

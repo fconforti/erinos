@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class MailConfig < ActiveRecord::Base
+class UserMailConfig < ActiveRecord::Base
   belongs_to :user
 
   validates :email, presence: true

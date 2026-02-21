@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-class IdentityLinksAPI < BaseAPI
+class UserIdentityLinksAPI < BaseAPI
   post "/identity-links" do
-    link = current_user.identity_links.create!
+    link = current_user.user_identity_links.create!
     [201, { code: link.code, expires_at: link.expires_at }.to_json]
   end
 
@@ -11,7 +11,7 @@ class IdentityLinksAPI < BaseAPI
     uid = request.env["HTTP_X_IDENTITY_UID"]
     halt 401, { error: "unauthorized" }.to_json unless provider && uid
 
-    link = IdentityLink.find_by(code: params[:code])
+    link = UserIdentityLink.find_by(code: params[:code])
     halt 404, { error: "not found" }.to_json unless link
 
     unless link.status == "pending"
@@ -23,7 +23,7 @@ class IdentityLinksAPI < BaseAPI
       halt 422, { error: "link expired" }.to_json
     end
 
-    identity = Identity.find_by(provider: provider, uid: uid)
+    identity = UserIdentity.find_by(provider: provider, uid: uid)
     if identity
       if identity.user_id == link.user_id
         link.update!(status: "claimed")
@@ -31,7 +31,7 @@ class IdentityLinksAPI < BaseAPI
         halt 409, { error: "identity already belongs to another user" }.to_json
       end
     else
-      Identity.create!(provider: provider, uid: uid, user: link.user)
+      UserIdentity.create!(provider: provider, uid: uid, user: link.user)
       link.update!(status: "claimed")
     end
 

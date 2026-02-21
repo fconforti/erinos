@@ -84,5 +84,27 @@ module Commands
       field "IMAP", "#{result['imap_host']}:#{result['imap_port']}"
       field "SMTP", "#{result['smtp_host']}:#{result['smtp_port']}"
     end
+
+    desc "tools ID", "List tools enabled for a user (use 'me' for yourself)"
+    def tools(id)
+      tools = client.get("/users/#{id}/tools")
+      if tools.empty?
+        say "No custom tools set (using agent defaults).", :yellow
+      else
+        tools.each { |t| say "  #{t}" }
+      end
+    end
+
+    desc "enable-tool ID TOOL", "Enable a tool for a user"
+    def enable_tool(id, tool)
+      client.post("/users/#{id}/tools", { tool: tool })
+      say "#{set_color(tool, :green)} enabled."
+    end
+
+    desc "disable-tool ID TOOL", "Disable a tool for a user"
+    def disable_tool(id, tool)
+      client.delete("/users/#{id}/tools/#{tool}")
+      say "#{set_color(tool, :yellow)} disabled."
+    end
   end
 end

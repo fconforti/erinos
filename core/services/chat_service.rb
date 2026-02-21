@@ -18,9 +18,10 @@ class ChatService
     chat.with_instructions(@agent.instructions)
 
     user = @conversation.user
-    mail_config = user.mail_config&.attributes&.slice("email", "imap_host", "imap_port", "smtp_host", "smtp_port", "password")
+    mail_config = user.user_mail_config&.attributes&.slice("email", "imap_host", "imap_port", "smtp_host", "smtp_port", "password")
     tool_context = { timezone: user.timezone, mail_config: mail_config }
-    @agent.agent_tools.pluck(:tool).each { |name| chat.with_tool(TOOL_CATALOG.fetch(name).new(**tool_context)) }
+    tool_names = user.user_tools.pluck(:tool)
+    tool_names.each { |name| chat.with_tool(TOOL_CATALOG.fetch(name).new(**tool_context)) }
 
     @conversation.messages.order(:created_at).each do |msg|
       chat.messages << RubyLLM::Message.new(role: msg.role.to_sym, content: msg.content)
