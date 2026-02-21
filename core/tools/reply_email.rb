@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "net/imap"
-
 class ReplyEmail < RubyLLM::Tool
+  include ImapSupport
+
   description "Replies to an email by its UID. Sends the reply to the original sender."
 
   param :uid, desc: "The UID of the email to reply to"
@@ -15,7 +15,7 @@ class ReplyEmail < RubyLLM::Tool
   def execute(uid:, body:)
     return "Error: mail not configured. Ask the user to set up mail first." unless @config
 
-    imap = connect
+    imap = connect_imap
     imap.select("INBOX")
 
     data = imap.uid_fetch(uid.to_i, ["ENVELOPE", "BODY[]"])

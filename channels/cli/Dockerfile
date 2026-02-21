@@ -1,5 +1,6 @@
 FROM ruby:3.4-alpine
 
+ENV LANG=C.UTF-8
 RUN apk add --no-cache build-base
 
 WORKDIR /app/channels/cli

@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 class SendEmail < RubyLLM::Tool
-  description "Sends an email to the user. Use this to deliver summaries, reminders, or any information the user requests by email."
+  description "Sends an email on behalf of the user."
 
+  param :to, desc: "Recipient email address"
   param :subject, desc: "Email subject line"
   param :body, desc: "Email body text"
 
@@ -10,12 +11,12 @@ class SendEmail < RubyLLM::Tool
     @config = mail_config
   end
 
-  def execute(subject:, body:)
+  def execute(to:, subject:, body:)
     return "Error: mail not configured. Ask the user to set up mail first." unless @config
 
     mail = Mail.new
     mail.from    = @config["email"]
-    mail.to      = @config["email"]
+    mail.to      = to
     mail.subject = subject
     mail.body    = body
 
@@ -30,6 +31,6 @@ class SendEmail < RubyLLM::Tool
 
     mail.deliver
 
-    "Email sent to #{@config['email']}."
+    "Email sent to #{to}."
   end
 end

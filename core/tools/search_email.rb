@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require "net/imap"
-
 class SearchEmail < RubyLLM::Tool
+  include ImapSupport
+
   description "Searches the user's inbox by keyword, sender, or subject. Returns matching emails with UIDs."
 
   param :from, desc: "Filter by sender email or name", required: false
@@ -25,7 +25,7 @@ class SearchEmail < RubyLLM::Tool
     criteria.push("SUBJECT", subject) if subject
     criteria.push("TEXT", keyword) if keyword
 
-    imap = connect
+    imap = connect_imap
     imap.select("INBOX")
 
     uids = imap.uid_search(criteria)
@@ -45,13 +45,5 @@ class SearchEmail < RubyLLM::Tool
     "Error connecting to mail server: #{e.message}"
   ensure
     imap&.logout rescue nil
-  end
-
-  private
-
-  def connect
-    imap = Net::IMAP.new(@config["imap_host"], port: @config["imap_port"], ssl: @config["imap_port"] == 993)
-    imap.login(@config["email"], @config["password"])
-    imap
   end
 end

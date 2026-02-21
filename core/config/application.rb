@@ -7,6 +7,7 @@ loader = Zeitwerk::Loader.new
 loader.push_dir(File.expand_path("../entities", __dir__))
 loader.push_dir(File.expand_path("../services", __dir__))
 loader.push_dir(File.expand_path("../tools", __dir__))
+loader.push_dir(File.expand_path("../lib", __dir__))
 loader.setup
 
 ActiveRecord::Base.establish_connection(
