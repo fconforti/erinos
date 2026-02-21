@@ -85,6 +85,63 @@ module Commands
       field "SMTP", "#{result['smtp_host']}:#{result['smtp_port']}"
     end
 
+    desc "contacts ID", "List contacts for a user (use 'me' for yourself)"
+    def contacts(id)
+      rows = client.get("/users/#{id}/contacts")
+      if rows.empty?
+        say "No contacts found.", :yellow
+        return
+      end
+
+      print_list(%w[ID Name Email Phone], rows.map { |c|
+        [c["id"], "#{c['first_name']} #{c['last_name']}", c["email"], c["phone"] || ""]
+      })
+    end
+
+    desc "add-contact ID", "Add a contact for a user (use 'me' for yourself)"
+    method_option :first_name, type: :string, required: true, desc: "First name"
+    method_option :last_name, type: :string, required: true, desc: "Last name"
+    method_option :email, type: :string, required: true, desc: "Email address"
+    method_option :phone, type: :string, desc: "Phone number"
+    def add_contact(id)
+      body = {
+        first_name: options[:first_name],
+        last_name: options[:last_name],
+        email: options[:email]
+      }
+      body[:phone] = options[:phone] if options[:phone]
+
+      result = client.post("/users/#{id}/contacts", body)
+      say "Contact added: #{set_color("#{result['first_name']} #{result['last_name']}", :green)} <#{result['email']}>"
+    end
+
+    desc "update-contact ID CONTACT_ID", "Update a contact for a user"
+    method_option :first_name, type: :string, desc: "First name"
+    method_option :last_name, type: :string, desc: "Last name"
+    method_option :email, type: :string, desc: "Email address"
+    method_option :phone, type: :string, desc: "Phone number"
+    def update_contact(id, contact_id)
+      body = {}
+      body[:first_name] = options[:first_name] if options[:first_name]
+      body[:last_name] = options[:last_name] if options[:last_name]
+      body[:email] = options[:email] if options[:email]
+      body[:phone] = options[:phone] if options[:phone]
+
+      if body.empty?
+        say "Nothing to update. Use --first-name, --last-name, --email, or --phone.", :yellow
+        return
+      end
+
+      result = client.patch("/users/#{id}/contacts/#{contact_id}", body)
+      say "Contact updated: #{set_color("#{result['first_name']} #{result['last_name']}", :green)} <#{result['email']}>"
+    end
+
+    desc "remove-contact ID CONTACT_ID", "Remove a contact for a user"
+    def remove_contact(id, contact_id)
+      client.delete("/users/#{id}/contacts/#{contact_id}")
+      say set_color("Contact removed.", :yellow)
+    end
+
     desc "tools ID", "List tools enabled for a user (use 'me' for yourself)"
     def tools(id)
       tools = client.get("/users/#{id}/tools")

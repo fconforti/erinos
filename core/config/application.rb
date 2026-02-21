@@ -17,5 +17,5 @@ ActiveRecord::Base.establish_connection(
 
 TOOL_CATALOG = Dir[File.expand_path("../tools/*.rb", __dir__)].to_h { |path|
   name = File.basename(path, ".rb")
-  [name, name.classify.constantize]
+  [name, name.camelize.constantize]
 }.freeze

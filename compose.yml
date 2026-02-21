@@ -47,13 +47,6 @@ services:
     entrypoint: ["ollama", "pull", "gpt-oss:120b-cloud"]
     restart: "no"
 
-  # Local SMTP — catches all outgoing emails, web UI at http://localhost:8025
-  mailpit:
-    image: axllent/mailpit
-    ports:
-      - "8025:8025"   # Web UI
-      - "1025:1025"   # SMTP
-
   # Management CLI — run ad-hoc, not with `docker compose up`
   cli:
     build:

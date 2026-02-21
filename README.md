@@ -81,18 +81,6 @@ erin users mail-config me \
 
 To revoke access later, delete the app password from Google's security settings.
 
-### Local development
-
-A Mailpit container catches all outgoing email. View the inbox at http://localhost:8025.
-
-```bash
-erin users mail-config me \
-  --email=dev@localhost \
-  --imap-host=mailpit --imap-port=1025 \
-  --smtp-host=mailpit --smtp-port=1025 \
-  --password=anything
-```
-
 ## Development
 
 ```bash

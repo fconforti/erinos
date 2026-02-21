@@ -20,7 +20,7 @@ class ChatService
 
     user = @conversation.user
     mail_config = user.user_mail_config&.attributes&.slice("email", "imap_host", "imap_port", "smtp_host", "smtp_port", "password")
-    tool_context = { timezone: user.timezone, mail_config: mail_config }
+    tool_context = { timezone: user.timezone, mail_config: mail_config, user: user }
     tool_names = user.user_tools.pluck(:tool)
     tool_names.each { |name| chat.with_tool(TOOL_CATALOG.fetch(name).new(**tool_context)) }
 

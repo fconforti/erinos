@@ -7,12 +7,16 @@ class SendEmail < RubyLLM::Tool
   param :subject, desc: "Email subject line"
   param :body, desc: "Email body text"
 
-  def initialize(mail_config: nil, **)
+  def initialize(mail_config: nil, user: nil, **)
     @config = mail_config
+    @user = user
   end
 
   def execute(to:, subject:, body:)
     return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    if @user && !@user.user_contacts.exists?(email: to)
+      return "Error: #{to} is not in the user's contacts. Ask the user to add them as a contact first."
+    end
 
     mail = Mail.new
     mail.from    = @config["email"]

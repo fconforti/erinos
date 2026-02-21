@@ -8,8 +8,9 @@ class ReplyEmail < RubyLLM::Tool
   param :uid, desc: "The UID of the email to reply to"
   param :body, desc: "The reply body text"
 
-  def initialize(mail_config: nil, **)
+  def initialize(mail_config: nil, user: nil, **)
     @config = mail_config
+    @user = user
   end
 
   def execute(uid:, body:)
@@ -25,6 +26,9 @@ class ReplyEmail < RubyLLM::Tool
     original = Mail.read_from_string(data.first.attr["BODY[]"])
 
     reply_to = original.reply_to&.first || "#{env.from.first.mailbox}@#{env.from.first.host}"
+    if @user && !@user.user_contacts.exists?(email: reply_to)
+      return "Error: #{reply_to} is not in the user's contacts. Ask the user to add them as a contact first."
+    end
     original_subject = env.subject || ""
     subject = original_subject.start_with?("Re:") ? original_subject : "Re: #{original_subject}"
 
