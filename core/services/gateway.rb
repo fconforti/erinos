@@ -10,7 +10,7 @@ class Gateway
     @user.conversations.create!(agent: agent)
   end
 
-  def reply(conversation, content, &on_chunk)
-    ChatService.new(conversation).reply(content, &on_chunk)
+  def reply(conversation, content, on_tool_call: nil, &on_chunk)
+    ChatService.new(conversation).reply(content, on_tool_call: on_tool_call, &on_chunk)
   end
 end

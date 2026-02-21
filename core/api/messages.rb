@@ -15,7 +15,8 @@ class MessagesAPI < BaseAPI
     stream(:keep_open) do |out|
       begin
         gateway = Gateway.new(current_user)
-        message = gateway.reply(conversation, body[:content]) do |chunk|
+        on_tool_call = ->(tool_call) { out << "data: #{JSON.generate(tool_call: tool_call.name)}\n\n" }
+        message = gateway.reply(conversation, body[:content], on_tool_call: on_tool_call) do |chunk|
           out << "data: #{JSON.generate(content: chunk.content)}\n\n" if chunk.content
         end
         out << "data: #{JSON.generate(content: "", done: true, message: serialize(message))}\n\n"

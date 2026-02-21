@@ -11,11 +11,12 @@ class ChatService
     end
   end
 
-  def reply(user_content, &on_chunk)
+  def reply(user_content, on_tool_call: nil, &on_chunk)
     @conversation.messages.create!(role: "user", content: user_content)
 
     chat = @context.chat(model: @model.name, provider: @model.provider.to_sym, assume_model_exists: true)
     chat.with_instructions(@agent.instructions)
+    chat.on_tool_call { |tool_call| on_tool_call.call(tool_call) } if on_tool_call
 
     user = @conversation.user
     mail_config = user.user_mail_config&.attributes&.slice("email", "imap_host", "imap_port", "smtp_host", "smtp_port", "password")
