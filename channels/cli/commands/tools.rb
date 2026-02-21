@@ -14,9 +14,12 @@ module Commands
         return
       end
 
-      print_list(%w[Name Description], rows.map { |t|
-        [t["name"], t["description"]]
-      })
+      groups = rows.group_by { |t| t["group"] || "general" }
+      groups.each do |group, tools|
+        say ""
+        say set_color(group, :cyan, :bold)
+        tools.each { |t| say "  #{set_color(t['name'], :green).ljust(30)} #{t['description']}" }
+      end
     end
   end
 end
