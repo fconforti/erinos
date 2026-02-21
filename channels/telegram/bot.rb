@@ -118,6 +118,9 @@ Telegram::Bot::Client.run(TOKEN) do |bot|
         conversation_id = ensure_conversation(cl, conversations, chat_id)
         stream_response(bot, cl, chat_id, conversation_id, message.text)
       rescue ErinosClient::Error => e
+        if e.message == "not found" && conversations.delete(chat_id)
+          retry
+        end
         LOGGER.error("Core error: #{e.message}")
         send_text(bot, chat_id, "Error: #{e.message}")
       rescue StandardError => e
