@@ -59,6 +59,40 @@ docker compose build cli
 docker compose run --rm cli chat
 ```
 
+## Mail Configuration
+
+Erin can send and read email on behalf of each user. Credentials are stored per-user via the CLI.
+
+### Gmail setup
+
+1. Enable 2-Step Verification on your Google account if not already active.
+2. Generate an app password at https://myaccount.google.com/apppasswords.
+3. Configure Erin:
+
+```bash
+erin users mail-config me \
+  --email=you@gmail.com \
+  --imap-host=imap.gmail.com \
+  --smtp-host=smtp.gmail.com \
+  --password=xxxx-xxxx-xxxx-xxxx
+```
+
+4. Verify by asking Erin to send you a test email.
+
+To revoke access later, delete the app password from Google's security settings.
+
+### Local development
+
+A Mailpit container catches all outgoing email. View the inbox at http://localhost:8025.
+
+```bash
+erin users mail-config me \
+  --email=dev@localhost \
+  --imap-host=mailpit --imap-port=1025 \
+  --smtp-host=mailpit --smtp-port=1025 \
+  --password=anything
+```
+
 ## Development
 
 ```bash

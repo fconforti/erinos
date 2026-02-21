@@ -10,11 +10,6 @@ services:
       - "4567:4567"
     environment:
       RACK_ENV: production
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-erin@localhost}
     volumes:
       - erin-db:/app/db/data
     depends_on:

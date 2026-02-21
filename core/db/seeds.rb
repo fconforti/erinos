@@ -15,8 +15,9 @@ erin = Agent.find_or_create_by(name: "Erin") do |a|
   a.default = true
 end
 
-AgentTool.find_or_create_by(agent: erin, tool: "current_time")
-AgentTool.find_or_create_by(agent: erin, tool: "send_email")
+%w[current_time send_email check_inbox read_email search_email reply_email].each do |tool|
+  AgentTool.find_or_create_by(agent: erin, tool: tool)
+end
 
 dev_user = User.find_or_create_by(name: "Developer") do |u|
   u.role = "admin"

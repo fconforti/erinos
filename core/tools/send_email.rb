@@ -6,24 +6,30 @@ class SendEmail < RubyLLM::Tool
   param :subject, desc: "Email subject line"
   param :body, desc: "Email body text"
 
-  def initialize(email: nil, **)
-    @email = email
+  def initialize(mail_config: nil, **)
+    @config = mail_config
   end
 
   def execute(subject:, body:)
-    return "Error: user has no email address configured." unless @email
+    return "Error: mail not configured. Ask the user to set up mail first." unless @config
 
-    recipient = @email
-    mail_subject = subject
-    mail_body = body
+    mail = Mail.new
+    mail.from    = @config["email"]
+    mail.to      = @config["email"]
+    mail.subject = subject
+    mail.body    = body
 
-    Mail.deliver do
-      from    ENV.fetch("SMTP_FROM")
-      to      recipient
-      subject mail_subject
-      body    mail_body
-    end
+    mail.delivery_method :smtp, {
+      address: @config["smtp_host"],
+      port: @config["smtp_port"],
+      user_name: @config["email"],
+      password: @config["password"],
+      authentication: :plain,
+      enable_starttls_auto: true
+    }
 
-    "Email sent to #{@email}."
+    mail.deliver
+
+    "Email sent to #{@config['email']}."
   end
 end

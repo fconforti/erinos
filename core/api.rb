@@ -12,12 +12,14 @@ require_relative "api/conversations"
 require_relative "api/messages"
 require_relative "api/identity_links"
 require_relative "api/users"
+require_relative "api/mail_configs"
 
 class API < Sinatra::Base
   set :bind, "0.0.0.0"
 
   before { content_type :json }
 
+  use MailConfigsAPI
   use UsersAPI
   use IdentityLinksAPI
   use MessagesAPI

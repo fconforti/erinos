@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class UsersAPI < BaseAPI
+  get "/users" do
+    User.all.map { |u| { id: u.id, name: u.name, email: u.email, timezone: u.timezone } }.to_json
+  end
+
   get "/users/:id" do
     user = find_user!
     serialize(user)
