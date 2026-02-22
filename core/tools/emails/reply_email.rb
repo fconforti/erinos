@@ -1,20 +1,15 @@
 # frozen_string_literal: true
 
 class ReplyEmail < RubyLLM::Tool
-  include ImapSupport
+  include EmailSupport
 
   description "Replies to an email by its UID. Sends the reply to the original sender."
 
   param :uid, desc: "The UID of the email to reply to"
   param :body, desc: "The reply body text"
 
-  def initialize(mail_config: nil, user: nil, **)
-    @config = mail_config
-    @user = user
-  end
-
   def execute(uid:, body:)
-    return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    return error if (error = require_config!)
 
     imap = connect_imap
     imap.select("INBOX")
@@ -26,9 +21,7 @@ class ReplyEmail < RubyLLM::Tool
     original = Mail.read_from_string(data.first.attr["BODY[]"])
 
     reply_to = original.reply_to&.first || "#{env.from.first.mailbox}@#{env.from.first.host}"
-    if @user && !@user.user_contacts.exists?(email: reply_to)
-      return "Error: #{reply_to} is not in the user's contacts. Ask the user to add them as a contact first."
-    end
+    return error if (error = require_contact!(reply_to))
     original_subject = env.subject || ""
     subject = original_subject.start_with?("Re:") ? original_subject : "Re: #{original_subject}"
 
@@ -39,15 +32,7 @@ class ReplyEmail < RubyLLM::Tool
     reply.body    = body
     reply.in_reply_to = env.message_id
     reply.references  = env.message_id
-
-    reply.delivery_method :smtp, {
-      address: @config["smtp_host"],
-      port: @config["smtp_port"],
-      user_name: @config["email"],
-      password: @config["password"],
-      authentication: :plain,
-      enable_starttls_auto: true
-    }
+    reply.delivery_method :smtp, smtp_settings
 
     reply.deliver
 

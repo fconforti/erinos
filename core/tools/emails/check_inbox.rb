@@ -1,18 +1,14 @@
 # frozen_string_literal: true
 
 class CheckInbox < RubyLLM::Tool
-  include ImapSupport
+  include EmailSupport
 
   description "Lists recent emails from the user's inbox. Returns subject, sender, date, and UID for each message."
 
   param :limit, desc: "Number of emails to fetch (default 10, max 50)", required: false
 
-  def initialize(mail_config: nil, **)
-    @config = mail_config
-  end
-
   def execute(limit: "10")
-    return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    return error if (error = require_config!)
 
     count = [[limit.to_i, 1].max, 50].min
     imap = connect_imap

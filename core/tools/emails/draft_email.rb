@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class DraftEmail < RubyLLM::Tool
-  include ImapSupport
+  include EmailSupport
 
   description "Creates a draft email and saves it to the user's Drafts folder for review. The user can send it from their email client."
 
@@ -9,12 +9,8 @@ class DraftEmail < RubyLLM::Tool
   param :subject, desc: "Email subject line"
   param :body, desc: "Email body text"
 
-  def initialize(mail_config: nil, **)
-    @config = mail_config
-  end
-
   def execute(to:, subject:, body:)
-    return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    return error if (error = require_config!)
 
     mail = Mail.new
     mail.from    = @config["email"]

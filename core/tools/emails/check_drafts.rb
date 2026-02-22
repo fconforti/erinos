@@ -1,18 +1,14 @@
 # frozen_string_literal: true
 
 class CheckDrafts < RubyLLM::Tool
-  include ImapSupport
+  include EmailSupport
 
   description "Lists draft emails, or reads a specific draft by UID."
 
   param :uid, desc: "UID of a draft to read in full (optional — omit to list all drafts)", required: false
 
-  def initialize(mail_config: nil, **)
-    @config = mail_config
-  end
-
   def execute(uid: nil)
-    return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    return error if (error = require_config!)
 
     imap = connect_imap
     drafts = find_drafts_folder(imap)

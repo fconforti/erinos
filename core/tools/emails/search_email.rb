@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class SearchEmail < RubyLLM::Tool
-  include ImapSupport
+  include EmailSupport
 
   description "Searches the user's inbox by keyword, sender, or subject. Returns matching emails with UIDs."
 
@@ -10,12 +10,8 @@ class SearchEmail < RubyLLM::Tool
   param :keyword, desc: "Search in the full email body and headers", required: false
   param :limit, desc: "Max results to return (default 10, max 50)", required: false
 
-  def initialize(mail_config: nil, **)
-    @config = mail_config
-  end
-
   def execute(from: nil, subject: nil, keyword: nil, limit: "10")
-    return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    return error if (error = require_config!)
     return "Error: provide at least one search filter (from, subject, or keyword)." unless from || subject || keyword
 
     count = [[limit.to_i, 1].max, 50].min

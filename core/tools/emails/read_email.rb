@@ -1,18 +1,14 @@
 # frozen_string_literal: true
 
 class ReadEmail < RubyLLM::Tool
-  include ImapSupport
+  include EmailSupport
 
   description "Reads the full content of an email by its UID. Use check_inbox or search_email first to find the UID."
 
   param :uid, desc: "The UID of the email to read"
 
-  def initialize(mail_config: nil, **)
-    @config = mail_config
-  end
-
   def execute(uid:)
-    return "Error: mail not configured. Ask the user to set up mail first." unless @config
+    return error if (error = require_config!)
 
     imap = connect_imap
     imap.select("INBOX")

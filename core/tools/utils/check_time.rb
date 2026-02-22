@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class CurrentTime < RubyLLM::Tool
+class CheckTime < RubyLLM::Tool
   description "Returns the current date and time for the user"
 
   def initialize(timezone: "UTC", **)
