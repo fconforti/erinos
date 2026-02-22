@@ -12,7 +12,7 @@ require_relative "api/conversations"
 require_relative "api/messages"
 require_relative "api/identity_links"
 require_relative "api/users"
-require_relative "api/mail_configs"
+require_relative "api/credentials"
 require_relative "api/user_tools"
 require_relative "api/user_contacts"
 
@@ -23,7 +23,7 @@ class API < Sinatra::Base
 
   use UserContactsAPI
   use UserToolsAPI
-  use MailConfigsAPI
+  use CredentialsAPI
   use UsersAPI
   use UserIdentityLinksAPI
   use MessagesAPI

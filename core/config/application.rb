@@ -11,6 +11,8 @@ loader.collapse(File.expand_path("../tools/contacts", __dir__))
 loader.collapse(File.expand_path("../tools/contacts/concerns", __dir__))
 loader.collapse(File.expand_path("../tools/emails", __dir__))
 loader.collapse(File.expand_path("../tools/emails/concerns", __dir__))
+loader.collapse(File.expand_path("../tools/calendar", __dir__))
+loader.collapse(File.expand_path("../tools/calendar/concerns", __dir__))
 loader.collapse(File.expand_path("../tools/utils", __dir__))
 loader.setup
 

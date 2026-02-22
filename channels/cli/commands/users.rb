@@ -61,28 +61,90 @@ module Commands
       field "Timezone", result["timezone"]
     end
 
-    desc "mail-config ID", "Show or set mail config (use 'me' for yourself)"
-    method_option :email, type: :string, desc: "Email address"
-    method_option :imap_host, type: :string, desc: "IMAP host (e.g. imap.gmail.com)"
-    method_option :imap_port, type: :numeric, desc: "IMAP port (default 993)"
-    method_option :smtp_host, type: :string, desc: "SMTP host (e.g. smtp.gmail.com)"
-    method_option :smtp_port, type: :numeric, desc: "SMTP port (default 587)"
-    method_option :password, type: :string, desc: "Mail password or app password"
-    def mail_config(id)
-      body = {}
-      %i[email imap_host imap_port smtp_host smtp_port password].each do |key|
-        body[key] = options[key] if options[key]
+    desc "credentials ID", "Show or set credentials (use 'me' for yourself)"
+    method_option :type, type: :string, desc: "Credential type (mail, google)"
+    method_option :email, type: :string, desc: "Email address (mail)"
+    method_option :imap_host, type: :string, desc: "IMAP host (mail)"
+    method_option :imap_port, type: :numeric, desc: "IMAP port (mail, default 993)"
+    method_option :smtp_host, type: :string, desc: "SMTP host (mail)"
+    method_option :smtp_port, type: :numeric, desc: "SMTP port (mail, default 587)"
+    method_option :password, type: :string, desc: "Password (mail)"
+    method_option :client_id, type: :string, desc: "OAuth client ID (google)"
+    method_option :client_secret, type: :string, desc: "OAuth client secret (google)"
+    def credentials(id)
+      type = options[:type]
+
+      unless type
+        rows = client.get("/users/#{id}/credentials")
+        if rows.empty?
+          say "No credentials configured.", :yellow
+        else
+          rows.each { |c| say "  #{c['type']}" }
+        end
+        return
       end
 
-      if body.any?
-        result = client.patch("/users/#{id}/mail-config", body)
+      data = {}
+      %i[email imap_host imap_port smtp_host smtp_port password client_id client_secret].each do |key|
+        data[key] = options[key] if options[key]
+      end
+
+      if data.any?
+        result = client.patch("/users/#{id}/credentials/#{type}", data)
       else
-        result = client.get("/users/#{id}/mail-config")
+        result = client.get("/users/#{id}/credentials/#{type}")
       end
 
-      field "Email", result["email"]
-      field "IMAP", "#{result['imap_host']}:#{result['imap_port']}"
-      field "SMTP", "#{result['smtp_host']}:#{result['smtp_port']}"
+      field "Type", result["type"]
+      result["data"]&.each { |k, v| field k, v }
+    end
+
+    desc "remove-credentials ID", "Remove credentials for a user"
+    method_option :type, type: :string, required: true, desc: "Credential type to remove (mail, google)"
+    def remove_credentials(id)
+      client.delete("/users/#{id}/credentials/#{options[:type]}")
+      say set_color("#{options[:type]} credentials removed.", :yellow)
+    end
+
+    desc "google-auth ID", "Authorize Google Calendar via device flow (use 'me' for yourself)"
+    method_option :client_id, type: :string, desc: "OAuth client ID (only needed if not already set)"
+    method_option :client_secret, type: :string, desc: "OAuth client secret (only needed if not already set)"
+    def google_auth(id)
+      if options[:client_id] && options[:client_secret]
+        client.patch("/users/#{id}/credentials/google", {
+          client_id: options[:client_id],
+          client_secret: options[:client_secret]
+        })
+      end
+
+      result = client.post("/users/#{id}/credentials/google/authorize", {})
+      url = result["verification_url"]
+      code = result["user_code"]
+      interval = result["interval"] || 5
+
+      say ""
+      say "Open this URL and enter the code:"
+      say set_color(url, :cyan)
+      say "Code: #{set_color(code, :green, :bold)}"
+      say ""
+
+      system("qrencode", "-t", "ANSIUTF8", url) if system("which qrencode > /dev/null 2>&1")
+
+      say "Waiting for authorization..."
+      loop do
+        sleep interval
+        poll = client.post("/users/#{id}/credentials/google/poll", {})
+        if poll["status"] == "authorized"
+          say set_color("Google Calendar connected.", :green)
+          break
+        end
+        if poll["error"] && poll["error"] != "authorization_pending" && poll["error"] != "slow_down"
+          say set_color("Authorization failed: #{poll['error']}", :red)
+          break
+        end
+        $stdout.write(".")
+        $stdout.flush
+      end
     end
 
     desc "contacts ID", "List contacts for a user (use 'me' for yourself)"

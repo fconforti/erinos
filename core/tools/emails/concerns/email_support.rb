@@ -3,9 +3,9 @@
 require "net/imap"
 
 module EmailSupport
-  def initialize(mail_config: nil, user: nil, **)
-    @config = mail_config
+  def initialize(user: nil, **)
     @user = user
+    @config = @user&.credential("mail")&.data
   end
 
   private
