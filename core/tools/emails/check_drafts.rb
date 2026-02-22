@@ -8,7 +8,7 @@ class CheckDrafts < RubyLLM::Tool
   param :uid, desc: "UID of a draft to read in full (optional — omit to list all drafts)", required: false
 
   def execute(uid: nil)
-    return error if (error = require_config!)
+    return msg if (msg = require_config!)
 
     imap = connect_imap
     drafts = find_drafts_folder(imap)

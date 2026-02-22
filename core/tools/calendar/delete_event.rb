@@ -8,7 +8,7 @@ class DeleteEvent < RubyLLM::Tool
   param :event_id, desc: "The event ID to delete", required: true
 
   def execute(event_id:)
-    return error if (error = require_calendar!)
+    return msg if (msg = require_calendar!)
 
     calendar_service.delete_event("primary", event_id)
     "Event deleted."

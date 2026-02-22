@@ -15,7 +15,7 @@ erin = Agent.find_or_create_by(name: "Erin") do |a|
   a.default = true
 end
 
-%w[check_time send_email draft_email check_drafts check_inbox read_email search_email reply_email add_contact list_contacts update_contact remove_contact check_calendar create_event update_event delete_event].each do |tool|
+TOOL_CATALOG.each_key do |tool|
   AgentTool.find_or_create_by(agent: erin, tool: tool)
 end
 
@@ -27,6 +27,6 @@ UserIdentity.find_or_create_by(provider: "cli", uid: "dev") do |i|
   i.user = dev_user
 end
 
-%w[check_time send_email draft_email check_drafts check_inbox read_email search_email reply_email add_contact list_contacts update_contact remove_contact check_calendar create_event update_event delete_event].each do |tool|
+TOOL_CATALOG.each_key do |tool|
   UserTool.find_or_create_by(user: dev_user, tool: tool)
 end

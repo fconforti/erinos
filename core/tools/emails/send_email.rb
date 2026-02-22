@@ -10,8 +10,8 @@ class SendEmail < RubyLLM::Tool
   param :body, desc: "Email body text"
 
   def execute(to:, subject:, body:)
-    return error if (error = require_config!)
-    return error if (error = require_contact!(to))
+    return msg if (msg = require_config!)
+    return msg if (msg = require_contact!(to))
 
     mail = Mail.new
     mail.from    = @config["email"]

@@ -6,7 +6,7 @@ class ListContacts < RubyLLM::Tool
   description "Lists all contacts for the user."
 
   def execute
-    return error if (error = require_user!)
+    return msg if (msg = require_user!)
 
     contacts = @user.user_contacts.order(:last_name, :first_name)
     return "No contacts found." if contacts.empty?

@@ -12,7 +12,7 @@ class CreateEvent < RubyLLM::Tool
   param :location, desc: "Event location", required: false
 
   def execute(summary:, start_time:, end_time:, description: nil, location: nil)
-    return error if (error = require_calendar!)
+    return msg if (msg = require_calendar!)
 
     event = Google::Apis::CalendarV3::Event.new(
       summary: summary,

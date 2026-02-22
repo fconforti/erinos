@@ -8,7 +8,7 @@ class ReadEmail < RubyLLM::Tool
   param :uid, desc: "The UID of the email to read"
 
   def execute(uid:)
-    return error if (error = require_config!)
+    return msg if (msg = require_config!)
 
     imap = connect_imap
     imap.select("INBOX")

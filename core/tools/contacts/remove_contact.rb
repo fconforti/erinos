@@ -8,7 +8,7 @@ class RemoveContact < RubyLLM::Tool
   param :email, desc: "Email of the contact to remove"
 
   def execute(email:)
-    return error if (error = require_user!)
+    return msg if (msg = require_user!)
 
     contact = @user.user_contacts.find_by(email: email)
     return "Error: no contact found with email #{email}." unless contact

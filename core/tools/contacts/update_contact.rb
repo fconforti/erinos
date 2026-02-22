@@ -12,7 +12,7 @@ class UpdateContact < RubyLLM::Tool
   param :phone, desc: "New phone number (optional)", required: false
 
   def execute(email:, first_name: nil, last_name: nil, new_email: nil, phone: nil)
-    return error if (error = require_user!)
+    return msg if (msg = require_user!)
 
     contact = @user.user_contacts.find_by(email: email)
     return "Error: no contact found with email #{email}." unless contact

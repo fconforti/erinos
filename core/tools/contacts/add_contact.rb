@@ -11,7 +11,7 @@ class AddContact < RubyLLM::Tool
   param :phone, desc: "Contact's phone number (optional)", required: false
 
   def execute(first_name:, last_name:, email:, phone: nil)
-    return error if (error = require_user!)
+    return msg if (msg = require_user!)
 
     contact = @user.user_contacts.new(first_name: first_name, last_name: last_name, email: email, phone: phone)
     return "Error: #{contact.errors.full_messages.join(', ')}" unless contact.save

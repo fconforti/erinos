@@ -13,7 +13,7 @@ class UpdateEvent < RubyLLM::Tool
   param :location, desc: "New event location", required: false
 
   def execute(event_id:, summary: nil, start_time: nil, end_time: nil, description: nil, location: nil)
-    return error if (error = require_calendar!)
+    return msg if (msg = require_calendar!)
 
     existing = calendar_service.get_event("primary", event_id)
 

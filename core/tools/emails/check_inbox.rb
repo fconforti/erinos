@@ -8,7 +8,7 @@ class CheckInbox < RubyLLM::Tool
   param :limit, desc: "Number of emails to fetch (default 10, max 50)", required: false
 
   def execute(limit: "10")
-    return error if (error = require_config!)
+    return msg if (msg = require_config!)
 
     count = [[limit.to_i, 1].max, 50].min
     imap = connect_imap

@@ -12,28 +12,28 @@ class CredentialsAPI < BaseAPI
 
   get "/users/:user_id/credentials" do
     user = find_user!
-    user.user_credentials.map { |c| { type: c.type } }.to_json
+    user.user_credentials.map { |c| { kind: c.kind } }.to_json
   end
 
-  get "/users/:user_id/credentials/:type" do
+  get "/users/:user_id/credentials/:kind" do
     user = find_user!
-    cred = user.user_credentials.find_by(type: params[:type])
+    cred = user.user_credentials.find_by(kind: params[:kind])
     halt 404, { error: "not configured" }.to_json unless cred
     serialize(cred)
   end
 
-  patch "/users/:user_id/credentials/:type" do
+  patch "/users/:user_id/credentials/:kind" do
     user = find_user!
     data = json_body
-    cred = user.user_credentials.find_or_initialize_by(type: params[:type])
+    cred = user.user_credentials.find_or_initialize_by(kind: params[:kind])
     cred.data = (cred.data || {}).merge(data.transform_keys(&:to_s))
     halt 422, { errors: cred.errors.full_messages }.to_json unless cred.save
     serialize(cred)
   end
 
-  delete "/users/:user_id/credentials/:type" do
+  delete "/users/:user_id/credentials/:kind" do
     user = find_user!
-    cred = user.user_credentials.find_by(type: params[:type])
+    cred = user.user_credentials.find_by(kind: params[:kind])
     halt 404, { error: "not configured" }.to_json unless cred
     cred.destroy
     [204, ""]
@@ -41,7 +41,7 @@ class CredentialsAPI < BaseAPI
 
   post "/users/:user_id/credentials/google/authorize" do
     user = find_user!
-    cred = user.user_credentials.find_by(type: "google")
+    cred = user.user_credentials.find_by(kind: "google")
     halt 422, { error: "Google credential not configured. Set client_id and client_secret first." }.to_json unless cred
     data = cred.data
     halt 422, { error: "Missing client_id or client_secret." }.to_json unless data["client_id"] && data["client_secret"]
@@ -67,7 +67,7 @@ class CredentialsAPI < BaseAPI
 
   post "/users/:user_id/credentials/google/poll" do
     user = find_user!
-    cred = user.user_credentials.find_by(type: "google")
+    cred = user.user_credentials.find_by(kind: "google")
     halt 422, { error: "Google credential not configured." }.to_json unless cred
     data = cred.data
     halt 422, { error: "No pending authorization. Run authorize first." }.to_json unless data["device_code"]
@@ -107,6 +107,6 @@ class CredentialsAPI < BaseAPI
 
   def serialize(cred)
     safe_data = cred.data.reject { |k, _| SENSITIVE_KEYS.include?(k.to_s) }
-    { type: cred.type, data: safe_data }.to_json
+    { kind: cred.kind, data: safe_data }.to_json
   end
 end

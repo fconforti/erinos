@@ -79,7 +79,7 @@ module Commands
         if rows.empty?
           say "No credentials configured.", :yellow
         else
-          rows.each { |c| say "  #{c['type']}" }
+          rows.each { |c| say "  #{c['kind']}" }
         end
         return
       end
@@ -95,7 +95,7 @@ module Commands
         result = client.get("/users/#{id}/credentials/#{type}")
       end
 
-      field "Type", result["type"]
+      field "Type", result["kind"]
       result["data"]&.each { |k, v| field k, v }
     end
 

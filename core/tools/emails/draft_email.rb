@@ -10,7 +10,7 @@ class DraftEmail < RubyLLM::Tool
   param :body, desc: "Email body text"
 
   def execute(to:, subject:, body:)
-    return error if (error = require_config!)
+    return msg if (msg = require_config!)
 
     mail = Mail.new
     mail.from    = @config["email"]

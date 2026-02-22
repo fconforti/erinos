@@ -8,7 +8,7 @@ class User < ActiveRecord::Base
   has_many :user_tools, dependent: :destroy
   has_many :conversations, dependent: :destroy
 
-  def credential(type)
-    user_credentials.find_by(type: type)
+  def credential(kind)
+    user_credentials.find_by(kind: kind)
   end
 end

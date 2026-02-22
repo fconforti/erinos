@@ -11,7 +11,7 @@ class SearchEmail < RubyLLM::Tool
   param :limit, desc: "Max results to return (default 10, max 50)", required: false
 
   def execute(from: nil, subject: nil, keyword: nil, limit: "10")
-    return error if (error = require_config!)
+    return msg if (msg = require_config!)
     return "Error: provide at least one search filter (from, subject, or keyword)." unless from || subject || keyword
 
     count = [[limit.to_i, 1].max, 50].min

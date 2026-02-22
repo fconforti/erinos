@@ -9,7 +9,7 @@ class ReplyEmail < RubyLLM::Tool
   param :body, desc: "The reply body text"
 
   def execute(uid:, body:)
-    return error if (error = require_config!)
+    return msg if (msg = require_config!)
 
     imap = connect_imap
     imap.select("INBOX")
@@ -21,7 +21,7 @@ class ReplyEmail < RubyLLM::Tool
     original = Mail.read_from_string(data.first.attr["BODY[]"])
 
     reply_to = original.reply_to&.first || "#{env.from.first.mailbox}@#{env.from.first.host}"
-    return error if (error = require_contact!(reply_to))
+    return msg if (msg = require_contact!(reply_to))
     original_subject = env.subject || ""
     subject = original_subject.start_with?("Re:") ? original_subject : "Re: #{original_subject}"
 
