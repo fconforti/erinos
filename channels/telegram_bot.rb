@@ -1,7 +1,6 @@
 class TelegramBot
   def initialize(token: ENV.fetch("TELEGRAM_BOT_TOKEN"))
     @token = token
-    @chats = {}
     @pending_links = {}
   end
 
@@ -58,21 +57,19 @@ class TelegramBot
   end
 
   def respond(bot, message, user)
-    chat = chat_for(user)
-    response = chat.ask(message.text)
-    bot.api.send_message(
-      chat_id: message.chat.id,
-      text: response.content
-    )
-  rescue RubyLLM::ContextLengthExceededError
-    @chats.delete(user.id)
-    bot.api.send_message(
-      chat_id: message.chat.id,
-      text: "Our conversation got too long, so I've started a fresh one. Please try again."
-    )
-  end
+    client = ErinosClient.new(user_id: user.telegram_id)
+    response = client.chat(message.text)
 
-  def chat_for(user)
-    @chats[user.id] ||= Erin.chat(user: user, channel: "telegram")
+    bot.api.send_message(
+      chat_id: message.chat.id,
+      text: response["response"]
+    )
+  rescue ErinosClient::Error => e
+    bot.api.send_message(
+      chat_id: message.chat.id,
+      text: e.message == "context_length_exceeded" ?
+        "Our conversation got too long, so I've started a fresh one. Please try again." :
+        "Something went wrong."
+    )
   end
 end

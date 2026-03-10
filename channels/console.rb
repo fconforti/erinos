@@ -6,27 +6,13 @@ class Console
   SPINNER_FRAMES = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
 
   def run
-    user = authenticate
-    abort "Bye!" unless user
+    pin = authenticate
+    abort "Bye!" unless pin
 
-    puts "\n\e[32mWelcome, #{user.name}!\e[0m\n\n"
+    @client = ErinosClient.new(user_id: pin)
 
-    chat = Erin.chat(user: user, channel: "console")
-    chat.on_tool_call do |tool_call|
-      label = case tool_call.name
-              when "read_skill" then tool_call.arguments["skill"]
-              when "run_command" then tool_call.arguments["provider"] || "command"
-              when "authorize_provider", "check_authorization" then tool_call.arguments["provider"]
-              when "store_credential" then tool_call.arguments["provider"]
-              when "manage_schedule" then tool_call.arguments["action"]
-              else tool_call.name
-              end
-      @spinner_label = label
-      unless @streaming
-        @spinner&.kill
-        @spinner = start_spinner
-      end
-    end
+    user = @client.me
+    puts "\n\e[32mWelcome, #{user.dig("user", "name")}!\e[0m\n\n"
 
     loop do
       print "\e[36myou>\e[0m "
@@ -37,8 +23,10 @@ class Console
       next if input.empty?
       break if input.downcase == "exit"
 
-      respond(chat, input)
+      respond(input)
     end
+  rescue ErinosClient::Error => e
+    abort "\e[31m#{e.message}\e[0m"
   end
 
   private
@@ -48,22 +36,7 @@ class Console
     input = read_pin
     return nil if input.nil? || input.empty?
 
-    if input.downcase == "new"
-      register
-    else
-      login(input)
-    end
-  end
-
-  def login(pin)
-    user = User.find_by(pin: pin)
-
-    unless user
-      puts "\e[31mUnknown PIN.\e[0m"
-      return nil
-    end
-
-    user
+    input.downcase == "new" ? register : input
   end
 
   def register
@@ -83,9 +56,10 @@ class Console
       return nil
     end
 
-    User.create!(name: name, pin: pin)
-  rescue ActiveRecord::RecordInvalid => e
-    puts e.message
+    ErinosClient.new(user_id: "").register(name: name, pin: pin)
+    pin
+  rescue ErinosClient::Error => e
+    puts "\e[31m#{e.message}\e[0m"
     nil
   end
 
@@ -94,28 +68,41 @@ class Console
     pin&.strip
   end
 
-  def respond(chat, input)
+  def respond(input)
     @spinner_label = "thinking"
     @streaming = false
     @spinner = start_spinner
-
     first_chunk = true
-    chat.ask(input) do |chunk|
-      next if chunk.content.nil? || chunk.content.empty?
 
-      if first_chunk
-        @streaming = true
-        @spinner&.kill
-        print "\r\e[K\e[35merin>\e[0m "
-        first_chunk = false
+    @client.chat_stream(input) do |event, data|
+      case event
+      when "tool_call"
+        @spinner_label = data["label"]
+        unless @streaming
+          @spinner&.kill
+          @spinner = start_spinner
+        end
+      when "token"
+        next unless data["content"]
+
+        if first_chunk
+          @streaming = true
+          @spinner&.kill
+          print "\r\e[K\e[35merin>\e[0m "
+          first_chunk = false
+        end
+        print data["content"]
       end
-      print chunk.content
     end
 
-    puts "\n\n"
-  rescue RubyLLM::ContextLengthExceededError
     @spinner&.kill
-    puts "\r\e[K\e[31mConversation too long. Please restart.\e[0m\n\n"
+    puts "\n\n"
+  rescue ErinosClient::Error => e
+    @spinner&.kill
+    puts "\r\e[K\e[31m#{e.message}\e[0m\n\n"
+  rescue Errno::ECONNREFUSED
+    @spinner&.kill
+    puts "\r\e[K\e[31mCannot connect to server.\e[0m\n\n"
   end
 
   def start_spinner
