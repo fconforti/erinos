@@ -4,7 +4,7 @@ require_relative "routes/auth"
 require_relative "routes/chat"
 require_relative "routes/voice"
 
-class Api < Sinatra::Base
+class App < Sinatra::Base
   set :server, :puma
   set :host_authorization, permitted: :all
 
@@ -30,6 +30,11 @@ class Api < Sinatra::Base
     def json(data)
       content_type :json
       data.to_json
+    end
+
+    def handle_context_overflow(user)
+      CHAT_MUTEX.synchronize { CHATS.delete(user.id) }
+      halt 400, json(error: "context_length_exceeded")
     end
 
     def transcribe(audio_file)

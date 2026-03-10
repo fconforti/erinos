@@ -1,6 +1,7 @@
 require "net/http"
 require "json"
 require "uri"
+require "securerandom"
 
 class ErinosClient
   def initialize(base_url: "http://localhost:4567", user_id:)
@@ -41,6 +42,30 @@ class ErinosClient
         end
       end
     end
+  end
+
+  def voice(file_path)
+    uri = URI("#{@base_url}/api/voice")
+    boundary = SecureRandom.hex
+
+    file_data = File.binread(file_path)
+    body = "--#{boundary}\r\n" \
+           "Content-Disposition: form-data; name=\"file\"; filename=\"#{File.basename(file_path)}\"\r\n" \
+           "Content-Type: audio/wav\r\n\r\n" \
+           "#{file_data}\r\n" \
+           "--#{boundary}--\r\n"
+
+    req = Net::HTTP::Post.new(uri)
+    req["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
+    req["X-User-ID"] = @user_id
+    req.body = body
+
+    response = Net::HTTP.start(uri.hostname, uri.port, read_timeout: 300) { |http| http.request(req) }
+    unless response.code == "200"
+      error = (JSON.parse(response.body)["error"] rescue "Voice request failed")
+      raise Error.new(response.code, error)
+    end
+    response.body
   end
 
   def register(name:, pin:)

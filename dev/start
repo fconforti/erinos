@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname "$0")/.."
+
+# Kill any leftover processes from a previous run
+for port in 4567 8080 8880; do
+  lsof -ti:$port 2>/dev/null | xargs kill 2>/dev/null || true
+done
+
+exec foreman start -f dev/Procfile -e .env "$@"

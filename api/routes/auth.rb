@@ -11,8 +11,7 @@ module Routes
         user = User.create!(name: name, pin: pin)
         json(user: { id: user.id, name: user.name })
       rescue ActiveRecord::RecordInvalid => e
-        status 422
-        json(error: e.message)
+        halt 422, json(error: e.message)
       end
 
       app.get "/api/auth/me" do

@@ -21,9 +21,7 @@ module Routes
         content_type "audio/wav"
         audio_data
       rescue RubyLLM::ContextLengthExceededError
-        CHAT_MUTEX.synchronize { CHATS.delete(user.id) }
-        status 400
-        json(error: "context_length_exceeded")
+        handle_context_overflow(user)
       end
     end
   end

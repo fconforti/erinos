@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 require_relative "../config/application"
-require_relative "../api/api"
+require_relative "../api/app"
 
 puts "Starting API server..."
-Api.run!(port: 4567, bind: "0.0.0.0")
+App.run!(port: 4567, bind: "0.0.0.0")

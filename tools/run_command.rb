@@ -12,7 +12,7 @@ class RunCommand < RubyLLM::Tool
   def initialize(user:, registry:)
     @user = user
     @registry = registry
-    @relay_url = ENV.fetch("OAUTH_RELAY_URL", "https://oauth.erinos.ai")
+    @relay_url = OAUTH_RELAY_URL
   end
 
   def execute(command:, provider: nil)

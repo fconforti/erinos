@@ -1,3 +1,6 @@
+require "tmpdir"
+require "open-uri"
+
 class TelegramBot
   def initialize(token: ENV.fetch("TELEGRAM_BOT_TOKEN"))
     @token = token
@@ -7,7 +10,8 @@ class TelegramBot
   def run
     ::Telegram::Bot::Client.run(@token) do |bot|
       bot.listen do |message|
-        next unless message.is_a?(::Telegram::Bot::Types::Message) && message.text
+        next unless message.is_a?(::Telegram::Bot::Types::Message)
+        next unless message.text || message.voice
 
         handle(bot, message)
       end
@@ -21,7 +25,11 @@ class TelegramBot
     user = User.find_by(telegram_id: telegram_id)
 
     if user
-      respond(bot, message, user)
+      if message.voice
+        respond_voice(bot, message, user)
+      else
+        respond(bot, message, user)
+      end
     elsif @pending_links[telegram_id]
       link_account(bot, message, telegram_id)
     else
@@ -38,7 +46,12 @@ class TelegramBot
   end
 
   def link_account(bot, message, telegram_id)
-    pin = message.text.strip
+    pin = message.text&.strip
+    unless pin
+      bot.api.send_message(chat_id: message.chat.id, text: "Please send your PIN as text.")
+      return
+    end
+
     user = User.find_by(pin: pin)
 
     if user
@@ -64,6 +77,51 @@ class TelegramBot
       chat_id: message.chat.id,
       text: response["response"]
     )
+  rescue ErinosClient::Error => e
+    bot.api.send_message(
+      chat_id: message.chat.id,
+      text: e.message == "context_length_exceeded" ?
+        "Our conversation got too long, so I've started a fresh one. Please try again." :
+        "Something went wrong."
+    )
+  end
+
+  def respond_voice(bot, message, user)
+    client = ErinosClient.new(user_id: user.telegram_id)
+
+    # Download voice file from Telegram
+    file_info = bot.api.get_file(file_id: message.voice.file_id)
+    file_path = file_info.file_path
+    download_url = "https://api.telegram.org/file/bot#{@token}/#{file_path}"
+
+    Dir.mktmpdir do |dir|
+      ogg_path = File.join(dir, "voice.ogg")
+      wav_path = File.join(dir, "voice.wav")
+
+      # Download OGG
+      URI.open(download_url) do |remote|
+        File.binwrite(ogg_path, remote.read)
+      end
+
+      # Convert OGG to WAV via ffmpeg
+      unless system("ffmpeg", "-i", ogg_path, "-ar", "16000", "-ac", "1", wav_path,
+                     "-y", "-loglevel", "error")
+        bot.api.send_message(chat_id: message.chat.id, text: "Could not process audio.")
+        return
+      end
+
+      # Send to voice API, get audio response
+      audio_data = client.voice(wav_path)
+
+      # Send voice message back
+      response_path = File.join(dir, "response.wav")
+      File.binwrite(response_path, audio_data)
+
+      bot.api.send_voice(
+        chat_id: message.chat.id,
+        voice: Faraday::UploadIO.new(response_path, "audio/wav")
+      )
+    end
   rescue ErinosClient::Error => e
     bot.api.send_message(
       chat_id: message.chat.id,

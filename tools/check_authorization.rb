@@ -14,7 +14,7 @@ class CheckAuthorization < RubyLLM::Tool
 
   def initialize(user:)
     @user = user
-    @relay_url = ENV.fetch("OAUTH_RELAY_URL", "https://oauth.erinos.ai")
+    @relay_url = OAUTH_RELAY_URL
   end
 
   def execute(provider:, state:)

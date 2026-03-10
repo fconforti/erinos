@@ -11,9 +11,7 @@ module Routes
         response = chat.ask(message)
         json(response: response.content)
       rescue RubyLLM::ContextLengthExceededError
-        CHAT_MUTEX.synchronize { CHATS.delete(user.id) }
-        status 400
-        json(error: "context_length_exceeded")
+        handle_context_overflow(user)
       end
 
       app.post "/api/chat/stream" do
@@ -42,9 +40,7 @@ module Routes
           out.close
         end
       rescue RubyLLM::ContextLengthExceededError
-        CHAT_MUTEX.synchronize { CHATS.delete(user.id) }
-        status 400
-        json(error: "context_length_exceeded")
+        handle_context_overflow(user)
       end
     end
   end
