@@ -33,32 +33,44 @@ if [[ "$ERIN_PROVIDER" == "ollama" && -n "$ERIN_MODEL" ]]; then
     sleep 5
   done
 
+  PULL_STATUS="/tmp/ollama-pull-status"
   START=$SECONDS
   for attempt in $(seq 1 5); do
-    ollama pull "$ERIN_MODEL" >>"$LOG" 2>&1 &
+    # ollama pull writes progress lines like "pulling abc123... 45% ▕██   ▏ 1.2 GB/2.7 GB"
+    ollama pull "$ERIN_MODEL" 2>&1 | tee -a "$LOG" | while IFS= read -r line; do
+      echo "$line" > "$PULL_STATUS"
+    done &
     PID=$!
     while kill -0 $PID 2>/dev/null; do
       ELAPSED=$(( SECONDS - START ))
-      progress "Downloading AI model (${MODEL_NAME})... $(printf '%dm%02ds' $((ELAPSED/60)) $((ELAPSED%60)))"
-      sleep 5
+      TIMESTAMP=$(printf '%dm%02ds' $((ELAPSED/60)) $((ELAPSED%60)))
+      DETAIL=$(cat "$PULL_STATUS" 2>/dev/null | tr -d '\r' | grep -oE '[0-9]+%.*' | tail -1 || true)
+      if [[ -n "$DETAIL" ]]; then
+        progress "Downloading ${ERIN_MODEL}: ${DETAIL} [${TIMESTAMP}]"
+      else
+        progress "Downloading ${ERIN_MODEL}... [${TIMESTAMP}]"
+      fi
+      sleep 3
     done
     wait $PID && break
     sleep 10
   done
+  rm -f "$PULL_STATUS"
 fi
 
 # ── Download Whisper model ───────────────────────────────────────────
 WHISPER_MODEL_PATH="/opt/erinos/models/ggml-base.en.bin"
 if [[ ! -f "$WHISPER_MODEL_PATH" ]]; then
-  progress "Downloading speech recognition model..."
-  curl -fsSL 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' \
+  progress "Downloading speech recognition model (whisper base.en, ~150MB)..."
+  curl -fL --progress-bar 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' \
     -o "$WHISPER_MODEL_PATH" >>"$LOG" 2>&1 || true
   chown erinos: "$WHISPER_MODEL_PATH"
+  progress "Speech recognition model downloaded"
 fi
 
 # ── Initialize database ─────────────────────────────────────────────
 progress "Initializing database..."
-su - erinos -c 'cd /opt/erinos && bundle exec bin/erinos db:reset' >>"$LOG" 2>&1
+su erinos -s /bin/bash -c 'export PATH="/opt/erinos/.rbenv/bin:/opt/erinos/.rbenv/shims:$PATH" && cd /opt/erinos && bundle exec bin/erinos db:reset' >>"$LOG" 2>&1
 
 # ── Start application services ───────────────────────────────────────
 if [[ -f "$ENV_FILE" ]]; then

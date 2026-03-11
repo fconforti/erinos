@@ -96,7 +96,11 @@ while true; do
   fi
 
   echo ""
-  sleep 10
+  if [[ -f /opt/erinos/.onboard-done ]]; then
+    sleep 10
+  else
+    sleep 3
+  fi
   tput rc
   tput ed
 done
