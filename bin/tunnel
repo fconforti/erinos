@@ -1,0 +1,13 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../services/tunnel_client"
+
+relay_url = ENV.fetch("RELAY_URL") { abort "RELAY_URL not set (e.g. wss://relay.erinos.ai)" }
+                .sub(%r{^https://}, "wss://")
+                .sub(%r{^http://}, "ws://")
+key = ENV.fetch("TUNNEL_KEY") { abort "TUNNEL_KEY not set" }
+api_url = ENV.fetch("CORE_URL", "http://localhost:4567")
+
+puts "Starting tunnel to #{relay_url}..."
+TunnelClient.new(relay_url: relay_url, key: key, api_url: api_url).run

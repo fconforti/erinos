@@ -79,6 +79,9 @@ if [[ -f "$ENV_FILE" ]]; then
   if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
     SERVICES="$SERVICES erinos-telegram"
   fi
+  if [[ -n "${TUNNEL_KEY:-}" ]]; then
+    SERVICES="$SERVICES erinos-tunnel"
+  fi
   systemctl enable $SERVICES >>"$LOG" 2>&1
   systemctl start $SERVICES >>"$LOG" 2>&1
 else

@@ -12,7 +12,7 @@ class RunCommand < RubyLLM::Tool
   def initialize(user:, registry:)
     @user = user
     @registry = registry
-    @relay_url = OAUTH_RELAY_URL
+    @relay_url = RELAY_URL
   end
 
   def execute(command:, provider: nil)
@@ -47,7 +47,7 @@ class RunCommand < RubyLLM::Tool
     refresh_token = credential.data["refresh_token"]
     return unless refresh_token
 
-    uri = URI("#{@relay_url}/auth/refresh")
+    uri = URI("#{@relay_url}/oauth/refresh")
     response = Net::HTTP.post(uri, {
       provider: provider,
       refresh_token: refresh_token

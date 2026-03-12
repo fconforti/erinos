@@ -347,6 +347,25 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
+cat > /etc/systemd/system/erinos-tunnel.service <<EOF
+[Unit]
+Description=ErinOS Relay Tunnel
+After=erinos-server.service
+Requires=erinos-server.service
+
+[Service]
+Type=simple
+User=erinos
+WorkingDirectory=/opt/erinos
+EnvironmentFile=/opt/erinos/.env
+ExecStart=/usr/local/bin/erinos tunnel
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > /etc/systemd/system/erinos-whisper.service <<EOF
 [Unit]
 Description=Whisper Speech-to-Text Server

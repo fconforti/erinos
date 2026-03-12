@@ -15,7 +15,7 @@ loader.setup
 
 Dir[File.expand_path("initializers/**/*.rb", __dir__)].each { |f| require f }
 
-OAUTH_RELAY_URL = ENV.fetch("OAUTH_RELAY_URL", "https://oauth.erinos.ai")
+RELAY_URL = ENV.fetch("RELAY_URL", "https://relay.erinos.ai")
 
 ActiveRecord::Base.establish_connection(
   adapter: "sqlite3",

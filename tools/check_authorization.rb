@@ -14,7 +14,7 @@ class CheckAuthorization < RubyLLM::Tool
 
   def initialize(user:)
     @user = user
-    @relay_url = OAUTH_RELAY_URL
+    @relay_url = RELAY_URL
   end
 
   def execute(provider:, state:)
@@ -39,7 +39,7 @@ class CheckAuthorization < RubyLLM::Tool
     while Time.now < deadline
       sleep POLL_INTERVAL
 
-      uri = URI("#{@relay_url}/poll?state=#{state}")
+      uri = URI("#{@relay_url}/oauth/poll?state=#{state}")
       response = Net::HTTP.get_response(uri)
 
       if response.code == "200"

@@ -2,7 +2,7 @@
 
 ErinOS is a local-first AI assistant built with Ruby. It runs on a dedicated Arch Linux appliance with full-disk encryption, local LLM inference via Ollama, voice input/output, and integrations with console, Telegram, and voice hardware. Erin's skills currently include Google Workspace, Home Assistant, Hue lights, Spotify, and Sonos.
 
-Everything runs locally. The only external dependency is an OAuth relay service that holds provider secrets so the appliance never needs them.
+Everything runs locally. The only external dependency is a cloud relay that holds OAuth provider secrets and provides a WebSocket tunnel for remote access.
 
 
 ## How It Works
@@ -27,7 +27,7 @@ erinos/
   config/               Application boot and initializers
   db/                   Migrations and seeds
   bin/                  Process entrypoints (server, console, telegram, scheduler)
-  oauth_relay/          OAuth relay service (deployed separately)
+  relay/                Cloud relay (OAuth + tunnel, deployed to Fly.io)
   speaker/              ESP32-S3 voice hardware firmware
   iso/                  Arch Linux installer (archiso profile)
   dev/                  Development tools (Procfile, start script, USB flash script)
@@ -55,8 +55,8 @@ Erin (`agents/erin.rb`) is a RubyLLM agent configured with a model and provider 
 
 Erin has seven tools:
 
-- **AuthorizeProvider**: Starts an OAuth flow by requesting a URL from the OAuth relay. The user clicks the link to authorize, then Erin polls for the resulting tokens.
-- **CheckAuthorization**: Polls the OAuth relay every 3 seconds (up to 120 seconds) waiting for the user to complete authorization.
+- **AuthorizeProvider**: Starts an OAuth flow by requesting a URL from the relay. The user clicks the link to authorize, then Erin polls for the resulting tokens.
+- **CheckAuthorization**: Polls the relay every 3 seconds (up to 120 seconds) waiting for the user to complete authorization.
 - **StoreCredential**: Saves non-OAuth credentials (like a Hue bridge IP and API key) to the database.
 - **ReadSkill**: Loads the full documentation for a skill so Erin knows how to use it.
 - **RunCommand**: Executes a shell command with credential injection. For OAuth providers, it refreshes expired tokens automatically. Credentials are injected as environment variables.
@@ -81,15 +81,13 @@ The `SkillRegistry` service loads all skills at boot and provides a catalog that
 
 Current providers: Google Workspace (calendar, gmail, drive, sheets, docs, slides, people, tasks), Spotify (playback), Hue (lights), Sonos (speakers), Home Assistant (control).
 
-### OAuth Relay
+### Cloud Relay
 
-The OAuth relay (`oauth_relay/`) is a separate Sinatra app deployed to Fly.io at `oauth.erinos.ai`. It holds OAuth client secrets for all providers so the appliance never needs them.
+The relay (`relay/`) is a separate Sinatra app deployed to Fly.io at `relay.erinos.ai`. It provides two services:
 
-The flow works like this: Erin calls `AuthorizeProvider`, which POSTs to the relay's `/auth/start` with a provider name and random state token. The relay returns an authorization URL. The user clicks it, authorizes with the provider, and the provider redirects back to the relay's `/callback`. The relay exchanges the code for tokens and stores them keyed by the state token. Meanwhile, Erin polls `/poll?state=...` until the tokens appear, then saves them to the database.
+**OAuth**: Holds provider client secrets so appliances never need them. Erin calls `/oauth/start` with a provider name, the user authorizes in their browser, the relay exchanges the code for tokens at `/oauth/callback`, and Erin polls `/oauth/poll` to retrieve them. Token refresh goes through `/oauth/refresh`. Sessions are in-memory with a 300-second TTL. Provider configs are in `relay/providers.yml`.
 
-Token refresh works similarly: `RunCommand` checks if a token is expired, and if so, POSTs the refresh token to `/auth/refresh` to get a new access token.
-
-The relay stores sessions in memory with a 300-second TTL. Provider configurations are in `oauth_relay/providers.yml`.
+**Tunnel**: The appliance opens a WebSocket to `/tunnel` on boot (authenticated with a shared `TUNNEL_KEY`). Clients (iPhone, Apple Watch, etc.) can then call `POST /api/chat` on the relay, which forwards the request through the tunnel to the appliance and returns the response. No port forwarding, VPN, or Tailscale required.
 
 ### Voice Pipeline
 
@@ -296,25 +294,21 @@ idf.py -p /dev/tty.usbmodem* flash monitor
 
 The serial monitor shows WiFi connection status, recording events, HTTP requests, and playback. Press the BOOT button on the board to record, release to send.
 
-### OAuth Relay
+### Cloud Relay
 
-The OAuth relay is a separate Sinatra app that must be publicly accessible (OAuth providers redirect back to it). For development, expose it via ngrok or deploy it somewhere like Fly.io:
+The relay must be publicly accessible (OAuth providers redirect to it, and it serves as the remote access point). Deploy to Fly.io:
 
 ```bash
-# Deploy to Fly.io (production)
-cd oauth_relay
-fly launch
-
-# Or for development: run locally + expose via ngrok
-cd oauth_relay
-bundle install
-ruby app.rb
-ngrok http 9292   # in another terminal
+cd relay
+cp .env.example .env   # fill in HOST, TUNNEL_KEY, and OAuth credentials
+./deploy.sh
 ```
 
-Set `OAUTH_RELAY_URL` in your `.env` to the public URL (e.g. `https://oauth.erinos.ai` or your ngrok URL). It cannot be localhost — OAuth providers need to redirect back to a reachable address.
+Set in the appliance's `.env`:
+- `RELAY_URL=https://relay.erinos.ai`
+- `TUNNEL_KEY=<same secret as the relay>`
 
-Provider OAuth credentials (client ID and secret) go in the relay's environment, not in the appliance's `.env`.
+Provider OAuth credentials (client ID and secret) go in the relay's `.env`, not the appliance's.
 
 ### Adding a New Skill
 
@@ -335,7 +329,7 @@ env:
   MY_DEVICE_TOKEN: api_key
 ```
 
-For OAuth providers, add the provider to `oauth_relay/providers.yml` with its OAuth URLs and scopes.
+For OAuth providers, add the provider to `relay/providers.yml` with its OAuth URLs and scopes.
 
 3. Write the skill documentation in `SKILL.md`:
 

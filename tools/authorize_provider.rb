@@ -13,7 +13,7 @@ class AuthorizeProvider < RubyLLM::Tool
   def initialize(user:, registry:)
     @user = user
     @registry = registry
-    @relay_url = OAUTH_RELAY_URL
+    @relay_url = RELAY_URL
   end
 
   def execute(provider:)
@@ -24,7 +24,7 @@ class AuthorizeProvider < RubyLLM::Tool
     return "Provider #{provider} does not support OAuth." unless skill.auth["type"] == "oauth"
 
     state = SecureRandom.hex(16)
-    uri = URI("#{@relay_url}/auth/start")
+    uri = URI("#{@relay_url}/oauth/start")
     response = Net::HTTP.post(
       uri,
       { provider: provider, state: state }.to_json,
