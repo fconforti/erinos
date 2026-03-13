@@ -71,19 +71,52 @@ class TelegramBot
 
   def respond(bot, message, user)
     client = ErinosClient.new(user_id: user.telegram_id)
-    response = client.chat(message.text)
 
-    bot.api.send_message(
-      chat_id: message.chat.id,
-      text: response["response"]
-    )
+    bot.api.send_chat_action(chat_id: message.chat.id, action: "typing")
+
+    # Send placeholder message that we'll edit as tokens arrive
+    sent = bot.api.send_message(chat_id: message.chat.id, text: "...")
+    message_id = sent.dig("result", "message_id")
+
+    current_text = ""
+    last_edit = Time.now
+
+    client.chat_stream(message.text) do |event, data|
+      case event
+      when "token"
+        current_text << data["content"]
+
+        # Split into a new message when approaching Telegram's 4096 char limit
+        if current_text.length > 4000
+          edit_message(bot, message.chat.id, message_id, current_text)
+          sent = bot.api.send_message(chat_id: message.chat.id, text: "...")
+          message_id = sent.dig("result", "message_id")
+          current_text = ""
+          last_edit = Time.now
+        elsif Time.now - last_edit >= 1.0
+          edit_message(bot, message.chat.id, message_id, current_text)
+          last_edit = Time.now
+        end
+      when "done"
+        edit_message(bot, message.chat.id, message_id, current_text) unless current_text.empty?
+      end
+    end
   rescue ErinosClient::Error => e
-    bot.api.send_message(
-      chat_id: message.chat.id,
-      text: e.message == "context_length_exceeded" ?
-        "Our conversation got too long, so I've started a fresh one. Please try again." :
-        "Something went wrong."
-    )
+    text = e.message == "context_length_exceeded" ?
+      "Our conversation got too long, so I've started a fresh one. Please try again." :
+      "Something went wrong."
+
+    if message_id
+      edit_message(bot, message.chat.id, message_id, text)
+    else
+      bot.api.send_message(chat_id: message.chat.id, text: text)
+    end
+  end
+
+  def edit_message(bot, chat_id, message_id, text)
+    bot.api.edit_message_text(chat_id: chat_id, message_id: message_id, text: text)
+  rescue Telegram::Bot::Exceptions::ResponseError
+    # Telegram returns error if text hasn't changed — safe to ignore
   end
 
   def respond_voice(bot, message, user)
