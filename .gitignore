@@ -2,3 +2,4 @@
 artifacts/**
 !artifacts/**/
 !artifacts/**/.gitkeep
+db/data/*.sqlite3
