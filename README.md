@@ -38,8 +38,10 @@ Text-to-speech. Creates an async job, returns a job ID.
 **Request:**
 
 ```json
-{ "text": "Hello world" }
+{ "text": "Hello world", "temperature": 0.8 }
 ```
+
+`temperature` is optional (default 0.8). Higher = more varied delivery, lower = more consistent.
 
 **Response (202):**
 
@@ -64,6 +66,22 @@ Check job status.
   "result": { "file": "artifacts/tts/1/final.wav", "chunks": ["..."] } }
 ```
 
+### `POST /api/tts/jobs/:id/retry`
+
+Re-generate specific chunks from an existing job.
+
+**Request:**
+
+```json
+{ "chunks": [2, 4], "temperature": 0.6 }
+```
+
+**Response (202):**
+
+```json
+{ "job_id": 1, "status": "retrying", "chunks": [2, 4] }
+```
+
 ## Services
 
 Each service lives in `services/<name>/` with its own venv. Services update a shared `jobs` table in SQLite.
@@ -83,7 +101,14 @@ venv/bin/pip install -r requirements.txt
 Thor-based CLI that talks to the API over HTTP.
 
 ```bash
+# Generate from text
 ruby cli/erinos.rb tts "Hello world"
+
+# Generate from file with custom temperature
+ruby cli/erinos.rb tts -f script.txt -t 0.9
+
+# Retry specific chunks
+ruby cli/erinos.rb tts:retry 7 -c 2,4 -t 0.6
 ```
 
 ## Setup
