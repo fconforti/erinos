@@ -45,7 +45,9 @@ Each service lives in `services/<name>/` with its own dependencies and venv.
 
 ### TTS (`services/tts/`)
 
-Uses Qwen3 TTS. Takes text as an argument, writes WAV to `artifacts/tts/`.
+Voice cloning with Qwen3 TTS (`Qwen3-TTS-12Hz-1.7B-Base`). Clones Erin's voice from a reference WAV in `services/tts/ref/`. Auto-detects device (CUDA, MPS, CPU).
+
+Requires `sox` (`brew install sox` on Mac).
 
 ```bash
 cd services/tts
