@@ -70,13 +70,11 @@ Each service lives in `services/<name>/` with its own venv. Services update a sh
 
 ### TTS (`services/tts/`)
 
-Voice cloning with Qwen3 TTS (`Qwen3-TTS-12Hz-1.7B-Base`). Clones Erin's voice from a reference WAV in `services/tts/ref/`. Auto-detects device (CUDA, MPS, CPU). Splits long text into chunks and concatenates.
-
-Requires `sox` (`brew install sox` on Mac).
+Voice cloning with Chatterbox Turbo (`ResembleAI/chatterbox-turbo`). Clones Erin's voice from a reference WAV in `services/tts/ref/`. Model weights stored locally in `services/tts/chatterbox/` (tracked with Git LFS). Auto-detects device (CUDA, MPS, CPU). Splits long text into chunks and concatenates.
 
 ```bash
 cd services/tts
-python3 -m venv venv
+python3.11 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
@@ -97,9 +95,9 @@ bundle install
 # 2. Database
 bundle exec rake db:create db:migrate
 
-# 3. TTS service
+# 3. TTS service (requires Python 3.11)
 cd services/tts
-python3 -m venv venv
+python3.11 -m venv venv
 venv/bin/pip install -r requirements.txt
 cd ../..
 

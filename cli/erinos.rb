@@ -8,14 +8,18 @@ module Erinos
   class CLI < Thor
     class_option :host, default: "http://localhost:9292", desc: "API base URL"
 
-    desc "tts TEXT", "Convert text to speech"
+    desc "tts TEXT", "Convert text to speech (Chatterbox Turbo)"
     def tts(text)
-      # Submit the job
-      result = api_post("/api/tts", { text: text })
+      run_tts_job("/api/tts", text)
+    end
+
+    private
+
+    def run_tts_job(endpoint, text)
+      result = api_post(endpoint, { text: text })
       job_id = result["job_id"]
       puts "Job #{job_id} queued..."
 
-      # Poll until done
       loop do
         job = api_get("/api/jobs/#{job_id}")
 
@@ -26,14 +30,15 @@ module Erinos
         when "failed"
           $stderr.puts "Error: #{job["error"]}"
           exit 1
+        when "queued"
+          print "\rStarting..."
+          sleep 2
         else
           print "\rProcessing: #{job["progress"]}/#{job["total"]} chunks"
           sleep 2
         end
       end
     end
-
-    private
 
     def api_get(path)
       uri = URI("#{options[:host]}#{path}")

@@ -1,3 +1,5 @@
 torch
+torchaudio
 soundfile
-qwen-tts
+numpy
+chatterbox-tts

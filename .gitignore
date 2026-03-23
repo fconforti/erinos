@@ -3,3 +3,6 @@ artifacts/**
 !artifacts/**/
 !artifacts/**/.gitkeep
 db/data/*.sqlite3
+db/data/*.sqlite3-shm
+db/data/*.sqlite3-wal
+**/venv/

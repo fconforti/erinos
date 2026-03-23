@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TTS service using Qwen3 TTS with Erin voice cloning.
+"""TTS service using Chatterbox Turbo with Erin voice cloning.
 
 Usage:
   Standalone:  python synthesize.py "Text to speak"
@@ -9,8 +9,14 @@ Splits text into chunks, generates audio per chunk, concatenates into final WAV.
 Updates job status in the database when running via API.
 """
 
-import sys
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 import os
+os.environ["TQDM_DISABLE"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+import sys
 import re
 import uuid
 import argparse
@@ -19,34 +25,37 @@ import json
 
 import torch
 import numpy as np
+import torchaudio as ta
 import soundfile as sf
-from qwen_tts import Qwen3TTSModel
+
+# Patch: PerthImplicitWatermarker is unavailable on non-CUDA platforms
+import perth
+if perth.PerthImplicitWatermarker is None:
+    perth.PerthImplicitWatermarker = perth.DummyWatermarker
+
+from chatterbox.tts_turbo import ChatterboxTurboTTS
 
 SERVICE_DIR = os.path.dirname(__file__)
 ARTIFACTS_DIR = os.path.join(SERVICE_DIR, "..", "..", "artifacts", "tts")
 REF_AUDIO = os.path.join(SERVICE_DIR, "ref", "erin_voice.wav")
-REF_TEXT_FILE = os.path.join(SERVICE_DIR, "ref", "erin_text.txt")
+CHATTERBOX_DIR = os.path.join(SERVICE_DIR, "chatterbox")
 
 
 def detect_device():
     if torch.cuda.is_available():
-        return "cuda:0", torch.bfloat16
+        return "cuda"
     elif torch.backends.mps.is_available():
-        return "mps", torch.float32
+        return "mps"
     else:
-        return "cpu", torch.float32
+        return "cpu"
 
 
 def load_model():
-    device, dtype = detect_device()
-    return Qwen3TTSModel.from_pretrained(
-        "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-        device_map=device,
-        dtype=dtype,
-    )
+    device = detect_device()
+    return ChatterboxTurboTTS.from_local(CHATTERBOX_DIR, device=device)
 
 
-def chunk_text(text, max_chars=500):
+def chunk_text(text, max_chars=200):
     """Split text into chunks at sentence boundaries."""
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     chunks = []
@@ -78,10 +87,7 @@ def update_job(db_path, job_id, **fields):
 
 
 def synthesize(model, text, job_id=None, db_path=None):
-    """Clone Erin's voice. Returns final output file path."""
-    with open(REF_TEXT_FILE) as f:
-        ref_text = f.read().strip()
-
+    """Clone Erin's voice to speak the given text. Returns final output file path."""
     chunks = chunk_text(text)
     total = len(chunks)
 
@@ -92,25 +98,16 @@ def synthesize(model, text, job_id=None, db_path=None):
 
     update_job(db_path, job_id, status="processing", total=total, progress=0)
 
-    # Create reusable voice prompt
-    prompt_items = model.create_voice_clone_prompt(
-        ref_audio=REF_AUDIO,
-        ref_text=ref_text,
-    )
+    # Pre-compute voice conditionals for reuse across chunks
+    model.prepare_conditionals(REF_AUDIO)
 
     chunk_paths = []
-    sample_rate = None
 
     for i, chunk in enumerate(chunks):
-        wavs, sr = model.generate_voice_clone(
-            text=chunk,
-            language="English",
-            voice_clone_prompt=prompt_items,
-        )
-        sample_rate = sr
+        wav = model.generate(chunk)
 
         chunk_path = os.path.join(output_dir, f"chunk_{i + 1:03d}.wav")
-        sf.write(chunk_path, wavs[0], sr)
+        ta.save(chunk_path, wav, model.sr)
         chunk_paths.append(chunk_path)
 
         update_job(db_path, job_id, progress=i + 1)
@@ -123,7 +120,7 @@ def synthesize(model, text, job_id=None, db_path=None):
 
     combined = np.concatenate(all_audio)
     final_path = os.path.join(output_dir, "final.wav")
-    sf.write(final_path, combined, sample_rate)
+    sf.write(final_path, combined, model.sr)
 
     result = {"file": final_path, "chunks": chunk_paths}
     update_job(db_path, job_id, status="done", result=json.dumps(result))
@@ -132,7 +129,7 @@ def synthesize(model, text, job_id=None, db_path=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Erin TTS voice cloning")
+    parser = argparse.ArgumentParser(description="Erin TTS voice cloning (Chatterbox)")
     parser.add_argument("text", nargs="?", help="Text to synthesize")
     parser.add_argument("--job-id", type=int, help="Job ID (for API mode)")
     parser.add_argument("--db", help="Path to SQLite database (for API mode)")
