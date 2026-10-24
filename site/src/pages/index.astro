@@ -1,0 +1,211 @@
+---
+// erinos.ai: one page. The install command, what erinos does, and the CLI.
+const install = "curl -fsSL https://erinos.ai/install.sh | bash";
+const repo = "https://github.com/fconforti/erinos";
+
+const features = [
+  {
+    title: "Projects are Claude sessions",
+    body: "<code>erin new personal/shop</code> creates the repo, the HTTPS remote and the token wiring, trusts the folder, and starts Claude Code in its own tmux session with Remote Control on. Pick it up from the Claude app on your phone.",
+  },
+  {
+    title: "Workspaces",
+    body: "<code>~/personal</code>, <code>~/work</code>, or any folder with a <code>.workspace</code> file. It holds the commit email and the GitHub owner, and git reads it directly. <code>erin move</code> carries a project across, history and memory included.",
+  },
+  {
+    title: "One token per repo",
+    body: "Fine-grained GitHub tokens in <code>~/.secrets</code>, managed by <code>erin secret</code>. git's credential helper hands each repo its own. No SSH keys, no global login, values never printed.",
+  },
+  {
+    title: "Shared conventions and skills",
+    body: "One <code>CLAUDE.md</code> and one skills folder, linked into every session. What belongs to a single machine stays in <code>~/.config/erinos</code>, out of the repo.",
+  },
+  {
+    title: "A doctor",
+    body: "<code>erin doctor</code> checks every project against the conventions, the token and git sync. <code>--fix</code> repairs the mechanical problems, and never pushes, commits or touches a token.",
+  },
+  {
+    title: "Back after a reboot",
+    body: "A systemd user unit runs <code>erin resume-all</code> at boot, and every session that was running continues its conversation.",
+  },
+];
+
+const cli = `erin new <workspace>/<name>        create a project and start Claude
+erin start | stop | attach <project>
+erin ls                            projects: session, token, git sync, remote
+erin doctor [project] [--fix]      conventions + git sync
+erin rename <project> <new>        with its session, history and settings
+erin move <project> <workspace>
+erin workspace [new|set|rename|rm] workspaces and their identity
+erin secret [set|rm <name> <KEY>]  ~/.secrets, values never shown
+erin skill [new <name>]            skills every Claude gets
+erin restart <project> | --all     reload conventions and skills
+erin setup                         wire erinos into the system`;
+
+const tree = `~/erinos/                 this repo: erin, conventions, skills, units
+~/.config/erinos/         this machine only: CLAUDE.md, tools.md
+~/.secrets/<name>.env     tokens and app secrets (0600)
+~/personal/.workspace     email, owner: git includes it
+~/personal/shop/          a project = a tmux session = erinos-shop
+~/work/.workspace
+~/work/api/`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>erinos</title>
+    <meta name="description" content="A personal OS for Claude Code: Arch Linux, one CLI, and conventions that make every project a Claude session." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:title" content="erinos" />
+    <meta property="og:description" content="A personal OS for Claude Code, on Arch Linux." />
+    <meta property="og:url" content="https://erinos.ai" />
+  </head>
+  <body>
+    <header class="wrap top">
+      <span class="mark">erinos</span>
+      <nav><a href="#cli">CLI</a><a href="/install.sh">install.sh</a><a href={repo}>GitHub</a></nav>
+    </header>
+
+    <main>
+      <section class="wrap hero">
+        <h1>A personal OS<br />for Claude Code.</h1>
+        <p class="lede">
+          Arch Linux, one command line and a set of conventions that turn a machine into a home for
+          Claude Code: every project in its own session, reachable from your phone, with its own
+          GitHub token and the same rules everywhere.
+        </p>
+        <div class="install">
+          <code id="cmd">{install}</code>
+          <button type="button" id="copy" aria-label="Copy the install command">Copy</button>
+        </div>
+        <p class="fine">
+          Arch Linux, as your user. It shows what it will do and asks once.
+          <a href="/install.sh">Read the script first</a>.
+        </p>
+      </section>
+
+      <section class="wrap grid">
+        {features.map((f) => (
+          <article>
+            <h2>{f.title}</h2>
+            <p set:html={f.body} />
+          </article>
+        ))}
+      </section>
+
+      <section class="wrap split" id="cli">
+        <div>
+          <h2 class="section">The CLI</h2>
+          <p>
+            <code>erin</code> is a single bash script. Run <code>erin help</code> for the details.
+          </p>
+          <pre>{cli}</pre>
+        </div>
+        <div>
+          <h2 class="section">The layout</h2>
+          <p>Where things live. The repo holds no secrets and nothing about your machine.</p>
+          <pre>{tree}</pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap">
+      <span>erinos.ai</span>
+      <a href={repo}>Source on GitHub</a>
+    </footer>
+
+    <script>
+      const button = document.getElementById("copy")!;
+      button.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(document.getElementById("cmd")!.textContent ?? "");
+          button.textContent = "Copied";
+        } catch {
+          button.textContent = "Select it";
+        }
+        setTimeout(() => (button.textContent = "Copy"), 1600);
+      });
+    </script>
+
+    <style is:global>
+      :root {
+        --bg: #f6f5f1;
+        --fg: #1c1b19;
+        --muted: #6b6860;
+        --line: #dedbd2;
+        --card: #fffefb;
+        --accent: #c2410c;
+        --code-bg: #1c1b19;
+        --code-fg: #f3f1ea;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121211;
+          --fg: #ecebe6;
+          --muted: #9a978e;
+          --line: #2a2926;
+          --card: #1a1a18;
+          --accent: #fb923c;
+          --code-bg: #0b0b0a;
+          --code-fg: #ecebe6;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.6 var(--sans);
+      }
+      a { color: inherit; text-underline-offset: 3px; }
+      a:hover { color: var(--accent); }
+      code { font: 0.9em var(--mono); }
+      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+      .top { display: flex; justify-content: space-between; align-items: center; padding-top: 24px; padding-bottom: 24px; }
+      .mark { font: 600 18px var(--mono); letter-spacing: -0.02em; }
+      .mark::before { content: "●"; color: var(--accent); margin-right: 8px; font-size: 12px; vertical-align: 2px; }
+      nav { display: flex; gap: 20px; font-size: 14px; }
+      nav a { text-decoration: none; color: var(--muted); }
+
+      .hero { padding-top: 72px; padding-bottom: 72px; }
+      h1 { font-size: clamp(40px, 7vw, 72px); line-height: 1.02; letter-spacing: -0.035em; margin: 0 0 24px; font-weight: 650; }
+      .lede { font-size: 19px; color: var(--muted); max-width: 640px; margin: 0 0 36px; }
+      .install {
+        display: flex; align-items: center; gap: 12px; max-width: 640px;
+        background: var(--code-bg); color: var(--code-fg);
+        border-radius: 10px; padding: 14px 14px 14px 20px;
+      }
+      .install code { flex: 1; overflow-x: auto; white-space: nowrap; font-size: 15px; }
+      .install code::before { content: "$ "; color: var(--accent); }
+      .install button {
+        font: 500 13px var(--sans); color: var(--code-fg); background: transparent;
+        border: 1px solid #ffffff33; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+      }
+      .install button:hover { border-color: var(--accent); }
+      .fine { font-size: 14px; color: var(--muted); margin-top: 14px; }
+
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; padding-bottom: 72px; }
+      article { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+      article h2 { font-size: 17px; margin: 0 0 8px; letter-spacing: -0.01em; }
+      article p { margin: 0; color: var(--muted); font-size: 15px; }
+      article code { color: var(--fg); }
+
+      .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 40px; padding-bottom: 80px; }
+      .section { font-size: 24px; letter-spacing: -0.02em; margin: 0 0 8px; }
+      .split p { color: var(--muted); margin: 0 0 16px; }
+      pre {
+        background: var(--code-bg); color: var(--code-fg); border-radius: 10px;
+        padding: 20px; overflow-x: auto; font: 13px/1.7 var(--mono); margin: 0;
+      }
+
+      footer { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 24px; padding-bottom: 40px; font-size: 14px; color: var(--muted); }
+    </style>
+  </body>
+</html>

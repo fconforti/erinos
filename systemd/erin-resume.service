@@ -1,0 +1,17 @@
+# Restarts the Claude sessions in tmux after a reboot (erin resume-all).
+# Part of erinos (systemd/erin-resume.service), enabled by `erin setup`. Disable: systemctl --user disable erin-resume
+[Unit]
+Description=Restart the Claude sessions in tmux (erin resume-all)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+# The user manager starts before the network is up: wait for it (up to 2 minutes), then go anyway.
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do ping -c1 -W1 1.1.1.1 >/dev/null 2>&1 && exit 0; sleep 2; done'
+ExecStart=%h/.local/bin/erin resume-all
+# The tmux server outlives this unit: stopping the unit must not kill the sessions.
+KillMode=process
+
+[Install]
+WantedBy=default.target

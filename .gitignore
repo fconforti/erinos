@@ -1,0 +1,5 @@
+# Local backups and leftovers; never commit secrets here.
+*.bak*
+*.pre-erinos
+.env
+.envrc

@@ -1,0 +1,956 @@
+#!/usr/bin/env bash
+# erin: the command line of erinos, this machine's personal OS (github.com/fconforti/erinos).
+# Projects as Claude Code sessions in tmux, secrets, skills, and the links that wire erinos into
+# the system. Follows the conventions in erinos/claude/CLAUDE.md (= ~/.claude/CLAUDE.md).
+# Run `erin help` for the commands.
+set -euo pipefail
+
+ERINOS="$(dirname "$(dirname "$(realpath "$0")")")"   # the repo this script lives in
+LOCAL="${XDG_CONFIG_HOME:-$HOME/.config}/erinos"      # this machine's own part: CLAUDE.md, tools.md (never in the repo)
+WS_FILE=".workspace"   # marks ~/<name> as a workspace; git-config syntax, git includes it for the repos there
+SECRETS="$HOME/.secrets"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/erin"
+STATE="$STATE_DIR/sessions"   # one project path per line: the sessions resume-all brings back
+me="$(basename "$0")"
+
+if [[ -t 1 ]]; then B=$'\e[1m'; R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; D=$'\e[2m'; N=$'\e[0m'; else B= R= G= Y= D= N=; fi
+die()  { echo "${R}error:${N} $*" >&2; exit 1; }
+info() { echo "$*"; }
+
+usage() {
+  cat <<EOF
+${B}$me${N}: the command line of erinos. Projects are Claude Code sessions in tmux.
+
+  $me new <workspace>/<name> [--token NAME] [--repo OWNER/REPO] [--no-start]
+        Create the folder, git repo, HTTPS remote and .envrc (token from ~/.secrets/NAME.env),
+        trust it for Claude, then start Claude in tmux. Defaults: token = folder name,
+        repo = <the workspace's GitHub owner>/<name>.
+  $me start <project>      Start Claude in tmux (session = project name, remote control on).
+                           Continues the last conversation if there is one.
+  $me stop <project>       End the project's tmux session (the conversation stays saved).
+  $me attach <project>     Switch to (or attach to) the project's tmux session.
+  $me ls                   All projects: session, token, remote.
+  $me doctor [project] [--fix] [--no-fetch]
+                           Check one project, or all of them: conventions, token, and git sync
+                           (fetches first; unpushed, unpulled and uncommitted show as "look").
+                           --fix repairs what is safe and mechanical: SSH remote -> HTTPS, .envrc
+                           exclude and direnv allow, stray core.sshCommand/user.email, and a
+                           fast-forward pull when the branch is clean and no Claude runs there,
+                           and /rename of idle Claude sessions to erinos-<project>.
+                           Never pushes, commits, or touches tokens.
+  $me resume-all           After a reboot, start again the sessions that were running.
+                           (Runs at boot through the systemd user unit erin-resume.service.)
+  $me restart <project> | --all   Stop and start Claude (to load new conventions or skills).
+  $me rename <project> <new-name | <workspace>/<name>> [--repo OWNER/REPO] [--yes]
+                           Rename or move a project: folder, tmux session, Claude history,
+                           .envrc, and optionally the git remote. Restarts Claude if it was running.
+  $me move <project> <workspace> [--yes]   Move a project to another workspace.
+
+  $me workspace            List workspaces: ~/<name> folders with a .workspace file, which sets the
+                           commit email, name and GitHub owner of every project in it.
+  $me workspace new <name> --email EMAIL [--owner GITHUB_OWNER] [--git-name NAME]
+                           Create ~/<name> as a workspace (or make an existing folder one).
+  $me workspace set <name> <email|owner|git-name> <value>   (unset <name> <owner|git-name>)
+  $me workspace rename <name> <new-name> [--yes]   Move the folder and every project in it.
+  $me workspace rm <name> [--yes]   Stop treating a workspace with no projects as one.
+
+  $me secret               List secrets files and key names (never values).
+  $me secret set <name> <KEY>   Store a value (prompted, hidden; or piped on stdin).
+  $me secret rm <name> <KEY>    Remove a key.
+        <name> is a secrets file in ~/.secrets (shop, blog, ...) or a project,
+        which means the file its .envrc loads (shop-api -> shop).
+
+  $me skill                List skills (erinos/skills, linked into ~/.claude/skills for every project).
+  $me skill new <name>     Create a skill skeleton and link it.
+  $me setup                Wire erinos into the system: links for the CLI, CLAUDE.md, skills and
+                           systemd units, git's credential helper, and the git identity of each
+                           workspace and of ~/erinos.
+                           Safe to re-run.
+
+<project> is a folder name (shop-api), or a path relative to ~ (work/shop-api). erinos itself
+is a project too ($(short "$ERINOS")).
+EOF
+}
+
+# ---------- projects ----------
+
+# ---------- workspaces ----------
+
+# A workspace is a folder directly in ~ with a .workspace file. The file is git config syntax:
+# user.email (and user.name) for the commits there, erin.owner for the GitHub owner of new repos.
+# git includes it through includeIf "gitdir:~/<name>/", so it is the one source for both.
+workspaces() { local f; for f in "$HOME"/*/"$WS_FILE"; do [[ -f "$f" ]] && basename "$(dirname "$f")"; done; return 0; }
+ws_file() { echo "$HOME/$1/$WS_FILE"; }
+is_ws()   { [[ "$1" =~ ^[A-Za-z0-9._-]+$ && -f "$(ws_file "$1")" ]]; }
+ws_get()  { git config -f "$(ws_file "$1")" --get "$2" 2>/dev/null || true; }
+need_ws() { is_ws "$1" || die "no workspace '$1' (workspaces: $(workspaces | paste -sd' ' -); create one with: $me workspace new $1)"; }
+ws_include_key() { echo "includeIf.gitdir:~/$1/.path"; }
+# The file git includes for commits in ~/erinos: the .workspace of the workspace it borrows its identity from.
+erinos_identity() { local f; f="$(git config --global --get "$(ws_include_key "$(basename "$ERINOS")")" 2>/dev/null || true)"; echo "${f/#\~/$HOME}"; }
+
+# Every git repo in a workspace. Projects sit directly there; deeper ones are found so doctor can flag them.
+projects() {
+  local ws
+  while IFS= read -r ws; do
+    find "$HOME/$ws" -mindepth 2 -maxdepth 4 -name .git -not -path '*/node_modules/*' -printf '%h\n' 2>/dev/null
+  done < <(workspaces) | sort
+  [[ -d "$ERINOS/.git" ]] && echo "$ERINOS"
+}
+
+# <workspace>/<name> (or ~/...) -> the project's absolute path, checking the workspace exists.
+project_path() {
+  local rel="${1#\~/}"; rel="${rel#"$HOME"/}"
+  [[ "$rel" =~ ^([A-Za-z0-9._-]+)/[A-Za-z0-9._-]+$ ]] || die "path must be <workspace>/<name>: projects sit directly in a workspace"
+  need_ws "${BASH_REMATCH[1]}"
+  echo "$HOME/$rel"
+}
+
+# Resolve a name or path to the project's absolute folder.
+resolve() {
+  local arg="${1:?project name required}" p
+  for p in "$arg" "$HOME/$arg" "$HOME/${arg#\~/}"; do
+    [[ -d "$p/.git" ]] && { realpath "$p"; return; }
+  done
+  local matches
+  matches="$(projects | awk -v n="$arg" -F/ '$NF == n')"
+  [[ -n "$matches" ]] || die "no project called '$arg' (see: $me ls)"
+  [[ "$(wc -l <<<"$matches")" -eq 1 ]] || die "'$arg' is ambiguous, use the path:"$'\n'"$matches"
+  echo "$matches"
+}
+
+name_of()  { basename "$1"; }
+# The workspace a folder is in: its name, "erinos" for the erinos repo, "-" outside any workspace.
+workspace_of() {
+  [[ "$1" == "$ERINOS" ]] && { echo erinos; return; }
+  local ws="${1#"$HOME"/}"; ws="${ws%%/*}"
+  if [[ "$1" == "$HOME"/*/* ]] && is_ws "$ws"; then echo "$ws"; else echo -; fi
+}
+short()    { echo "${1/#$HOME/\~}"; }
+
+# Claude Code keeps conversations in ~/.claude/projects/<path, every non-alphanumeric as ->.
+claude_dir()       { echo "$HOME/.claude/projects/$(sed 's#[^A-Za-z0-9]#-#g' <<<"$1")"; }
+has_conversation() { compgen -G "$(claude_dir "$1")/*.jsonl" >/dev/null; }
+
+# Claude Code keeps per-folder settings, including "trust this folder", in ~/.claude.json.
+# trust: mark a folder trusted. move: carry a folder's settings to its new path (and trust it).
+claude_json() {
+  python3 - "$@" <<'PY'
+import json, os, sys, tempfile
+path = os.path.expanduser("~/.claude.json")
+try:
+    data = json.load(open(path))
+except FileNotFoundError:
+    data = {}
+projects = data.setdefault("projects", {})
+op, *dirs = sys.argv[1:]
+if op == "move":
+    old, new = dirs
+    entry = projects.pop(old, {})
+    projects[new] = {**entry, **projects.get(new, {})}
+    target = new
+else:
+    target = dirs[0]
+entry = projects.setdefault(target, {})
+if op == "trust" and entry.get("hasTrustDialogAccepted") is True:
+    sys.exit(0)
+entry["hasTrustDialogAccepted"] = True
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".claude.json.")
+os.fchmod(fd, 0o600)
+with os.fdopen(fd, "w") as f:
+    json.dump(data, f, indent=2)
+os.replace(tmp, path)
+PY
+}
+
+token_name() { sed -n 's#^dotenv ~/.secrets/\(.*\)\.env$#\1#p' "$1/.envrc" 2>/dev/null | head -1; }
+has_token()  { [[ -f "$SECRETS/$1.env" ]] && grep -q '^GH_TOKEN=' "$SECRETS/$1.env"; }
+
+# ---------- git sync ----------
+
+# Fetch origin with the project's own token (doctor runs outside direnv). Quiet; never prompts.
+fetch_origin() {
+  local dir="$1" tok; tok="$(token_name "$dir")"
+  ( [[ -n "$tok" && -f "$SECRETS/$tok.env" ]] && { set -a; source "$SECRETS/$tok.env"; set +a; }
+    GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$dir" fetch -q origin ) >/dev/null 2>&1
+}
+
+# "<changed> <ahead> <behind> <upstream>" for the current branch (upstream "-" if none).
+sync_counts() {
+  local dir="$1" changed up ab
+  changed="$(git -C "$dir" status --porcelain 2>/dev/null | wc -l)"
+  if up="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+    ab="$(git -C "$dir" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null || echo '0 0')"
+    echo "$changed $ab $up"
+  else
+    echo "$changed 0 0 -"
+  fi
+}
+
+# ---------- tmux ----------
+
+session_exists() { tmux has-session -t "=$1" 2>/dev/null; }
+claude_running() { session_exists "$1" && tmux list-panes -s -t "=$1:" -F '#{pane_current_command}' 2>/dev/null | grep -qx claude; }
+
+confirm() {
+  [[ "${YES:-0}" -eq 1 ]] && return 0
+  [[ -t 0 ]] || die "$1 (pass --yes to confirm)"
+  local a; read -rp "$1 [y/N] " a; [[ "$a" =~ ^[Yy] ]] || die "cancelled"
+}
+
+# The Claude session's name (prompt box, /resume, Remote Control): erinos-<project>; erinos itself is "erinos".
+session_title() { [[ "$1" == erinos ]] && echo erinos || echo "erinos-$1"; }
+
+# The name Claude shows on its prompt box border ("──── erinos-shop-api ─"), or nothing.
+claude_label() {
+  tmux capture-pane -p -t "=$1:" 2>/dev/null | sed -n 's/^─\{3,\} \([^ ─]\{1,\}\) ─*$/\1/p' | tail -1
+}
+# Idle: the prompt is empty and nothing is running ("esc to interrupt" shows while Claude works).
+claude_idle() {
+  local screen; screen="$(tmux capture-pane -p -t "=$1:" 2>/dev/null)"
+  ! grep -q 'esc to interrupt' <<<"$screen" && grep -qE $'^❯[ \u00a0]*$' <<<"$screen"   # the prompt is followed by a no-break space
+}
+
+remember() { mkdir -p "$STATE_DIR"; touch "$STATE"; grep -qxF "$1" "$STATE" || echo "$1" >> "$STATE"; }
+forget()   { [[ -f "$STATE" ]] || return 0; local t; t="$(mktemp)"; grep -vxF "$1" "$STATE" > "$t" || true; mv "$t" "$STATE"; }
+
+cmd_start() {
+  local dir name cmd
+  dir="$(resolve "${1:-}")"; name="$(name_of "$dir")"
+  if session_exists "$name" && claude_running "$name"; then
+    info "${G}$name${N}: Claude is already running in tmux session '$name'."
+  else
+    cmd="claude"
+    has_conversation "$dir" && cmd+=" --continue"
+    cmd+=" --name $(session_title "$name") --remote-control $(session_title "$name")"
+    # Typed into an interactive shell, so rbenv and direnv (the token) load as they do for you.
+    if session_exists "$name"; then
+      local busy; busy="$(tmux display -p -t "=$name:" '#{pane_current_command}')"
+      [[ "$busy" =~ ^(bash|zsh|sh|fish)$ ]] || die "tmux session '$name' is running '$busy'; stop it first or use another name"
+    else
+      tmux new-session -d -s "$name" -c "$dir"
+    fi
+    tmux send-keys -t "=$name:" "cd $(printf %q "$dir") && $cmd" Enter
+    info "${G}$name${N}: started '$cmd' in tmux session '$name'."
+  fi
+  remember "$dir"
+  info "  Switch: ${B}$me attach $name${N}"
+}
+
+cmd_stop() {
+  local dir name
+  dir="$(resolve "${1:-}")"; name="$(name_of "$dir")"
+  forget "$dir"
+  if session_exists "$name"; then
+    tmux kill-session -t "=$name"
+    info "$name: tmux session ended. Its conversation is saved; '$me start $name' continues it."
+  else
+    info "$name: no tmux session running."
+  fi
+}
+
+cmd_attach() {
+  local name; name="$(name_of "$(resolve "${1:-}")")"
+  session_exists "$name" || die "no tmux session '$name' (start it with: $me start $name)"
+  if [[ -n "${TMUX:-}" ]]; then tmux switch-client -t "=$name"; else exec tmux attach -t "=$name"; fi
+}
+
+cmd_resume_all() {
+  [[ -s "$STATE" ]] || { info "Nothing to resume."; return; }
+  local dir
+  while IFS= read -r dir; do
+    [[ -d "$dir/.git" ]] || { info "${Y}skip${N} $(short "$dir"): folder is gone"; forget "$dir"; continue; }
+    cmd_start "$dir"
+  done < <(cat "$STATE")
+}
+
+# ---------- new ----------
+
+cmd_new() {
+  local rel="" token="" repo="" start=1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --token) token="${2:?}"; shift 2 ;;
+      --repo) repo="${2:?}"; shift 2 ;;
+      --no-start) start=0; shift ;;
+      -*) die "unknown option $1" ;;
+      *) [[ -z "$rel" ]] || die "one path only"; rel="$1"; shift ;;
+    esac
+  done
+  [[ -n "$rel" ]] || die "usage: $me new <workspace>/<name>"
+  local dir name ws owner
+  dir="$(project_path "$rel")"; rel="${dir#"$HOME"/}"; ws="${rel%%/*}"; name="$(basename "$rel")"
+  owner="$(ws_get "$ws" erin.owner)"
+  [[ -n "$repo" || -n "$owner" ]] || die "workspace $ws has no GitHub owner: pass --repo OWNER/$name, or $me workspace set $ws owner <owner>"
+  token="${token:-$name}"; repo="${repo:-$owner/$name}"
+  [[ "$token" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid token name '$token'"
+  [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "repo must be OWNER/REPO"
+  session_exists "$name" && ! [[ -d "$dir" ]] && die "a tmux session called '$name' already exists for another folder"
+
+  mkdir -p "$dir"
+  if [[ ! -d "$dir/.git" ]]; then
+    git -C "$dir" init -q -b main
+    info "git repo created in $(short "$dir")"
+  fi
+  if git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+    info "remote origin already set: $(git -C "$dir" remote get-url origin)"
+  else
+    git -C "$dir" remote add origin "https://github.com/$repo.git"
+    info "remote origin: https://github.com/$repo.git"
+  fi
+  if [[ -e "$dir/.envrc" ]]; then
+    info ".envrc already there, left as is"
+  else
+    printf '# GitHub access for ~/%s: fine-grained token (%s: %s), stored with: erin secret set %s GH_TOKEN\ndotenv ~/.secrets/%s.env\n' \
+      "$rel" "${repo%%/*}" "${repo#*/}" "$token" "$token" > "$dir/.envrc"
+    info ".envrc written (token: ~/.secrets/$token.env)"
+  fi
+  grep -qxF .envrc "$dir/.git/info/exclude" 2>/dev/null || echo .envrc >> "$dir/.git/info/exclude"
+  # direnv refuses to load a missing dotenv file, so allow only once the file exists.
+  [[ -f "$SECRETS/$token.env" ]] && (cd "$dir" && direnv allow . 2>/dev/null)
+
+  if ! has_token "$token"; then
+    cat <<EOF
+
+${Y}Token missing.${N} To give this project GitHub access:
+  1. Create the repo if it doesn't exist: https://github.com/new  (${repo})
+  2. Create a fine-grained token: https://github.com/settings/personal-access-tokens/new
+     owner ${repo%%/*}, only repo ${repo#*/}, Contents: Read and write
+     (add Workflows: Read and write if it will have .github/workflows/)
+  3. $me secret set $token GH_TOKEN
+  4. cd $(short "$dir") && direnv allow .
+EOF
+    [[ "$start" -eq 1 ]] && info "  Then restart Claude so it sees the token: $me stop $name && $me start $name"
+  fi
+  claude_json trust "$dir" && info "folder trusted for Claude"
+  [[ "$start" -eq 1 ]] && { echo; cmd_start "$dir"; }
+  return 0
+}
+
+# ---------- rename and move ----------
+
+set_remote() {
+  [[ "$2" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "repo must be OWNER/REPO"
+  git -C "$1" remote set-url origin "https://github.com/$2.git"
+  info "remote origin: https://github.com/$2.git"
+}
+
+# After a project folder has moved from $1 to $2: carry its Claude history and memory, its Claude
+# folder settings (trust), the paths in its .envrc and its entry in the resume list.
+relocate() {
+  local old="$1" new="$2" oldrel="${1#"$HOME"/}" newrel="${2#"$HOME"/}"
+  if [[ -d "$(claude_dir "$old")" ]]; then
+    mv "$(claude_dir "$old")" "$(claude_dir "$new")"
+    info "  Claude history and memory moved"
+  fi
+  claude_json move "$old" "$new" && info "  Claude folder settings moved (folder trusted)"
+  if [[ -f "$new/.envrc" ]]; then
+    sed -i "s#~/$oldrel\\([:/ ]\\)#~/$newrel\\1#" "$new/.envrc"
+    (cd "$new" && direnv allow . 2>/dev/null) && info "  .envrc updated and allowed"
+  fi
+  if [[ -f "$STATE" ]] && grep -qxF "$old" "$STATE"; then
+    sed -i "s#^$old\$#$new#" "$STATE"
+  fi
+  return 0
+}
+
+cmd_rename() {
+  local src="" dst="" repo=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo) repo="${2:?}"; shift 2 ;;
+      --yes|-y) YES=1; shift ;;
+      -*) die "unknown option $1" ;;
+      *) if [[ -z "$src" ]]; then src="$1"; elif [[ -z "$dst" ]]; then dst="$1"; else die "too many arguments"; fi; shift ;;
+    esac
+  done
+  [[ -n "$src" && -n "$dst" ]] || die "usage: $me rename <project> <new-name | <workspace>/<name>>"
+  local old new oldname newname
+  old="$(resolve "$src")"; oldname="$(name_of "$old")"
+  [[ "$old" != "$ERINOS" ]] || die "erinos isn't a project folder to rename"
+  dst="${dst#\~/}"; dst="${dst#"$HOME"/}"
+  if [[ "$dst" == */* ]]; then
+    new="$(project_path "$dst")"
+  else
+    [[ "$dst" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid name '$dst'"
+    new="$(dirname "$old")/$dst"
+  fi
+  newname="$(name_of "$new")"
+  if [[ "$old" == "$new" ]]; then [[ -n "$repo" ]] || die "same name"; set_remote "$new" "$repo"; return; fi
+  [[ ! -e "$new" ]] || die "$(short "$new") already exists"
+  [[ "$newname" == "$oldname" ]] || ! session_exists "$newname" || die "a tmux session called '$newname' already exists"
+  [[ ! -e "$(claude_dir "$new")" ]] || die "Claude already has history for $(short "$new"): $(claude_dir "$new")"
+
+  local was_running=0
+  if session_exists "$oldname"; then
+    claude_running "$oldname" && was_running=1
+    confirm "tmux session '$oldname' will be closed$([[ $was_running -eq 1 ]] && echo " (Claude is running: it will be interrupted and restarted)"). Continue?"
+    tmux kill-session -t "=$oldname"
+  fi
+
+  mkdir -p "$(dirname "$new")"
+  mv "$old" "$new"
+  info "moved $(short "$old") -> $(short "$new")"
+  relocate "$old" "$new"
+  if [[ -n "$repo" ]]; then
+    set_remote "$new" "$repo"
+  else
+    local url; url="$(git -C "$new" remote get-url origin 2>/dev/null || true)"
+    [[ "$newname" != "$oldname" && "$url" == */"$oldname".git ]] && info "${Y}note${N} remote is still $url. If you rename the GitHub repo too, run: $me rename ... --repo OWNER/$newname (or git remote set-url)"
+  fi
+  local ow nw; ow="$(workspace_of "$old")"; nw="$(workspace_of "$new")"
+  [[ "$ow" == "$nw" ]] || \
+    info "${Y}note${N} moved from workspace $ow to $nw: commits now use $(ws_get "$nw" user.email). If the GitHub repo moves too (to $(ws_get "$nw" erin.owner)), transfer it there, then: $me rename $newname $newname --repo OWNER/REPO, and check its token ($me doctor $newname)"
+
+  if [[ "$was_running" -eq 1 ]]; then echo; cmd_start "$new"
+  else info "Start it with: $me start $newname"; fi
+}
+
+cmd_move() {
+  local args=() x
+  for x in "$@"; do case "$x" in --yes|-y) YES=1 ;; *) args+=("$x") ;; esac; done
+  [[ ${#args[@]} -eq 2 ]] || die "usage: $me move <project> <workspace>"
+  need_ws "${args[1]}"
+  local dir; dir="$(resolve "${args[0]}")"
+  [[ "$(dirname "$dir")" != "$HOME/${args[1]}" ]] || die "$(name_of "$dir") is already in ${args[1]}"
+  cmd_rename "$dir" "${args[1]}/$(name_of "$dir")"
+}
+
+# ---------- workspace ----------
+
+ws_wire() {   # git includes the workspace's .workspace for the repos in it
+  local key; key="$(ws_include_key "$1")"
+  [[ "$(git config --global --get "$key" 2>/dev/null || true)" == "~/$1/$WS_FILE" ]] && return 0
+  git config --global --unset-all "$key" 2>/dev/null || true
+  git config --global "$key" "~/$1/$WS_FILE"
+  info "  git: commits in ~/$1 use ~/$1/$WS_FILE"
+}
+
+ws_key() {
+  case "$1" in email) echo user.email ;; git-name|name) echo user.name ;; owner) echo erin.owner ;;
+    *) die "unknown setting '$1' (email, owner, git-name)" ;; esac
+}
+
+cmd_workspace() {
+  local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls|list)
+      local ws n email owner md
+      printf "${B}%-12s %-9s %-30s %-15s %s${N}\n" WORKSPACE PROJECTS EMAIL OWNER CLAUDE.md
+      while IFS= read -r ws; do
+        n="$(projects | grep -c "^$HOME/$ws/" || true)"
+        email="$(ws_get "$ws" user.email)"; owner="$(ws_get "$ws" erin.owner)"
+        [[ -f "$HOME/$ws/CLAUDE.md" ]] && md="~/$ws/CLAUDE.md" || md="-"
+        printf "%-12s %-9s %-30s %-15s %s\n" "$ws" "$n" "${email:-none}" "${owner:--}" "$md"
+      done < <(workspaces)
+      local idf; idf="$(erinos_identity)"
+      echo "${D}erinos ($(short "$ERINOS")) commits with the identity of $([[ -f "$idf" ]] && basename "$(dirname "$idf")" || echo "no workspace: $me setup").${N}" ;;
+    new)
+      local ws="" email="" owner="" gname=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --email) email="${2:?}"; shift 2 ;;
+          --owner) owner="${2:?}"; shift 2 ;;
+          --git-name) gname="${2:?}"; shift 2 ;;
+          --yes|-y) YES=1; shift ;;
+          -*) die "unknown option $1" ;;
+          *) [[ -z "$ws" ]] || die "one name only"; ws="$1"; shift ;;
+        esac
+      done
+      [[ "$ws" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "usage: $me workspace new <name> --email EMAIL [--owner GITHUB_OWNER] [--git-name NAME]"
+      [[ -n "$email" ]] || die "--email is required: commits need it (user.useConfigOnly)"
+      ! is_ws "$ws" || die "~/$ws is already a workspace (change it with: $me workspace set $ws ...)"
+      [[ "$HOME/$ws" != "$ERINOS" ]] || die "~/$ws is the erinos repo"
+      [[ ! -d "$HOME/$ws/.git" ]] || die "~/$ws is a git repo, not a folder of projects"
+      if [[ -d "$HOME/$ws" && -n "$(ls -A "$HOME/$ws")" ]]; then
+        confirm "~/$ws exists and isn't empty: make it a workspace (the git repos in it become its projects)?"
+      fi
+      mkdir -p "$HOME/$ws"
+      printf '# erinos workspace ~/%s, in git config syntax: git includes it for every repo in ~/%s, erin reads erin.owner.
+# Change it with: erin workspace set %s <email|owner|git-name> <value>
+' "$ws" "$ws" "$ws" > "$(ws_file "$ws")"
+      git config -f "$(ws_file "$ws")" user.email "$email"
+      [[ -z "$gname" ]] || git config -f "$(ws_file "$ws")" user.name "$gname"
+      [[ -z "$owner" ]] || git config -f "$(ws_file "$ws")" erin.owner "$owner"
+      info "Created ~/$ws/$WS_FILE"
+      ws_wire "$ws"
+      if [[ ! -f "$(erinos_identity)" ]]; then
+        git config --global "$(ws_include_key "$(basename "$ERINOS")")" "~/$ws/$WS_FILE"; info "  git: erinos commits with $ws's identity (the first workspace)"
+      fi
+      info "New projects: $me new $ws/<name>. Conventions for this workspace only go in ~/$ws/CLAUDE.md (Claude reads it in every project there)." ;;
+    set)
+      [[ $# -eq 3 ]] || die "usage: $me workspace set <name> <email|owner|git-name> <value>"
+      need_ws "$1"
+      local key; key="$(ws_key "$2")"
+      git config -f "$(ws_file "$1")" "$key" "$3"
+      info "~/$1/$WS_FILE: $key = $3" ;;
+    unset)
+      [[ $# -eq 2 ]] || die "usage: $me workspace unset <name> <owner|git-name>"
+      need_ws "$1"
+      local key; key="$(ws_key "$2")"; [[ "$key" != user.email ]] || die "a workspace needs an email"
+      git config -f "$(ws_file "$1")" --unset "$key" || true
+      info "~/$1/$WS_FILE: $key removed" ;;
+    rename|mv) ws_rename "$@" ;;
+    rm|remove)
+      local ws="" x
+      for x in "$@"; do case "$x" in --yes|-y) YES=1 ;; *) ws="$x" ;; esac; done
+      need_ws "$ws"
+      local left; left="$(projects | grep "^$HOME/$ws/" || true)"
+      [[ -z "$left" ]] || die "~/$ws still has projects; move them first ($me move <project> <workspace>):"$'\n'"$left"
+      [[ "$(erinos_identity)" != "$(ws_file "$ws")" ]] || die "erinos commits with this workspace's identity; point it to another first: git config --global '$(ws_include_key "$(basename "$ERINOS")")' '~/<workspace>/$WS_FILE'"
+      confirm "Stop using ~/$ws as a workspace (its .workspace file and git include go away)?"
+      rm -f -- "$(ws_file "$ws")"
+      git config --global --unset-all "$(ws_include_key "$ws")" 2>/dev/null || true
+      info "~/$ws is no longer a workspace. The folder itself is left in place; delete it yourself if you don't need it." ;;
+    *) die "usage: $me workspace [ls | new <name> --email E | set <name> <key> <value> | unset <name> <key> | rename <name> <new> | rm <name>]" ;;
+  esac
+}
+
+# Rename a workspace: the folder moves, and every project in it is relocated as erin rename does.
+ws_rename() {
+  local old="" new="" x
+  for x in "$@"; do
+    case "$x" in --yes|-y) YES=1 ;; -*) die "unknown option $x" ;;
+      *) if [[ -z "$old" ]]; then old="$x"; elif [[ -z "$new" ]]; then new="$x"; else die "too many arguments"; fi ;; esac
+  done
+  [[ -n "$old" && -n "$new" ]] || die "usage: $me workspace rename <name> <new-name>"
+  need_ws "$old"
+  [[ "$new" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid name '$new'"
+  [[ ! -e "$HOME/$new" ]] || die "~/$new already exists"
+  local dirs=() running=() d
+  while IFS= read -r d; do [[ -n "$d" ]] && dirs+=("$d"); done < <(projects | grep "^$HOME/$old/" || true)
+  for d in "${dirs[@]+"${dirs[@]}"}"; do
+    [[ ! -e "$(claude_dir "$HOME/$new/${d#"$HOME/$old/"}")" ]] || die "Claude already has history for ~/$new/${d#"$HOME/$old/"}"
+    session_exists "$(name_of "$d")" && running+=("$d")
+  done
+  confirm "Move ~/$old to ~/$new with its ${#dirs[@]} project(s)$([[ ${#running[@]} -gt 0 ]] && echo "; ${#running[@]} tmux session(s) will be closed and Claude restarted")?"
+  for d in "${running[@]+"${running[@]}"}"; do tmux kill-session -t "=$(name_of "$d")"; done
+  mv "$HOME/$old" "$HOME/$new"
+  info "moved ~/$old -> ~/$new"
+  for d in "${dirs[@]+"${dirs[@]}"}"; do
+    info "$(name_of "$d"):"; relocate "$d" "$HOME/$new/${d#"$HOME/$old/"}"
+  done
+  sed -i "1,2s#~/$old\\([ ,:]\\)#~/$new\\1#g; 1,2s#workspace set $old #workspace set $new #" "$(ws_file "$new")"
+  git config --global --unset-all "$(ws_include_key "$old")" 2>/dev/null || true
+  ws_wire "$new"
+  if [[ "$(erinos_identity)" == "$HOME/$old/$WS_FILE" ]]; then
+    git config --global "$(ws_include_key "$(basename "$ERINOS")")" "~/$new/$WS_FILE"; info "  git: erinos commits with $new's identity"
+  fi
+  for d in "${running[@]+"${running[@]}"}"; do echo; cmd_start "$HOME/$new/${d#"$HOME/$old/"}"; done
+  return 0
+}
+
+# ---------- secrets ----------
+
+# A secrets file name: an existing ~/.secrets/<name>.env, else the file a project's .envrc loads, else a new <name>.
+secret_file() {
+  local n="$1" dir tok
+  [[ "$n" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid name '$n'"
+  if [[ -f "$SECRETS/$n.env" ]]; then echo "$n"; return; fi
+  if dir="$( (resolve "$n") 2>/dev/null )" && tok="$(token_name "$dir")" && [[ -n "$tok" ]]; then echo "$tok"; return; fi
+  echo "$n"
+}
+
+cmd_secret() {
+  umask 077; mkdir -p "$SECRETS"; chmod 700 "$SECRETS"
+  local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls|list)
+      local f only=""
+      [[ $# -gt 0 ]] && only="$(secret_file "$1")"
+      shopt -s nullglob
+      for f in "$SECRETS"/*.env; do
+        [[ -z "$only" || "$(basename "$f" .env)" == "$only" ]] || continue
+        echo "$(basename "$f" .env):"
+        grep -oE '^[A-Za-z_][A-Za-z0-9_]*' "$f" | sed 's/^/  /'
+      done ;;
+    set)
+      [[ $# -eq 2 ]] || die "usage: $me secret set <name> <KEY>"
+      local name key value file tmp
+      name="$(secret_file "$1")"; key="$2"
+      [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid key name '$key'"
+      [[ "$name" == "$1" ]] || info "($1 uses ~/.secrets/$name.env)"
+      if [[ -t 0 ]]; then read -rsp "Value for $key: " value; echo; else IFS= read -r value || true; fi
+      [[ -n "$value" ]] || die "empty value, nothing saved"
+      [[ "$value" != *"'"* && "$value" != *$'\n'* ]] || die "values with ' or newlines are not supported"
+      file="$SECRETS/$name.env"; touch "$file"; chmod 600 "$file"
+      tmp="$(mktemp "$SECRETS/.tmp.XXXXXX")"
+      grep -v "^$key=" "$file" > "$tmp" || true
+      printf "%s='%s'\n" "$key" "$value" >> "$tmp"
+      mv "$tmp" "$file"; chmod 600 "$file"
+      info "Saved $key in ~/.secrets/$name.env"
+      info "Sessions already running in projects that use it need a restart to see it ($me stop/start)." ;;
+    rm|remove)
+      [[ "${!#:-}" == --yes ]] && { YES=1; set -- "${@:1:$#-1}"; }
+      [[ $# -eq 2 ]] || die "usage: $me secret rm <name> <KEY>"
+      local name key file tmp
+      name="$(secret_file "$1")"; key="$2"; file="$SECRETS/$name.env"
+      [[ -f "$file" ]] && grep -q "^$key=" "$file" || die "no $key in ~/.secrets/$name.env"
+      confirm "Remove $key from ~/.secrets/$name.env?"
+      tmp="$(mktemp "$SECRETS/.tmp.XXXXXX")"
+      grep -v "^$key=" "$file" > "$tmp" || true
+      mv "$tmp" "$file"; chmod 600 "$file"
+      info "Removed $key from ~/.secrets/$name.env" ;;
+    *) die "usage: $me secret [ls [name] | set <name> <KEY> | rm <name> <KEY>]" ;;
+  esac
+}
+
+# ---------- git credentials ----------
+
+# git's credential helper for github.com (set by erin setup). git runs it from inside the repo, so it
+# answers with the token that repo's .envrc names, read straight from ~/.secrets: pushes and pulls
+# work in one-liners, scripts and systemd jobs, not only after direnv has loaded the token.
+# Outside a project it falls back to $GH_TOKEN; with no token it answers nothing, and git asks as usual.
+cmd_git_credential() {
+  [[ "${1:-}" == get ]] || exit 0          # store/erase: nothing to do, tokens are managed by erin secret
+  local line host="" top tok token=""
+  while IFS= read -r line && [[ -n "$line" ]]; do [[ "$line" == host=* ]] && host="${line#host=}"; done
+  [[ "$host" == github.com || "$host" == gist.github.com ]] || exit 0
+  if top="$(git rev-parse --show-toplevel 2>/dev/null)" && tok="$(token_name "$top")" && [[ -n "$tok" && -f "$SECRETS/$tok.env" ]]; then
+    token="$(sed -n "s/^GH_TOKEN='\(.*\)'$/\1/p; s/^GH_TOKEN=\([^'].*\)$/\1/p" "$SECRETS/$tok.env" | head -1)"
+  fi
+  token="${token:-${GH_TOKEN:-}}"
+  [[ -n "$token" ]] || exit 0
+  printf 'username=x-access-token\npassword=%s\n' "$token"
+}
+
+# ---------- restart ----------
+
+cmd_restart() {
+  local targets=() dir name
+  if [[ "${1:-}" == --all ]]; then
+    YES="${YES:-0}"; [[ "${2:-}" == --yes ]] && YES=1
+    while IFS= read -r dir; do session_exists "$(name_of "$dir")" && targets+=("$dir"); done < <(projects)
+    [[ ${#targets[@]} -gt 0 ]] || { info "No sessions running."; return; }
+    confirm "Restart ${#targets[@]} session(s): $(for d in "${targets[@]}"; do printf '%s ' "$(name_of "$d")"; done)?"
+  else
+    [[ "${2:-}" == --yes ]] && YES=1
+    dir="$(resolve "${1:-}")"; targets=("$dir")
+    session_exists "$(name_of "$dir")" && confirm "Restart Claude in $(name_of "$dir")?"
+  fi
+  for dir in "${targets[@]}"; do
+    name="$(name_of "$dir")"
+    session_exists "$name" && tmux kill-session -t "=$name"
+    cmd_start "$dir" | head -1
+  done
+}
+
+# ---------- skills ----------
+
+cmd_skill() {
+  local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    ls|list)
+      local d n desc linked
+      for d in "$ERINOS"/skills/*/; do
+        [[ -f "$d/SKILL.md" ]] || continue
+        n="$(basename "$d")"
+        desc="$(sed -n 's/^description: //p' "$d/SKILL.md" | head -1 | cut -c1-90)"
+        [[ "$(readlink -f "$HOME/.claude/skills/$n" 2>/dev/null)" == "$(realpath "$d")" ]] && linked="" || linked=" ${R}(not linked: $me setup)${N}"
+        printf "${B}%-16s${N} %s%s\n" "$n" "$desc" "$linked"
+      done ;;
+    new)
+      local n="${1:?usage: $me skill new <name>}" d
+      [[ "$n" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "skill names are lowercase-with-dashes"
+      d="$ERINOS/skills/$n"; [[ ! -e "$d" ]] || die "$(short "$d") already exists"
+      mkdir -p "$d"
+      cat > "$d/SKILL.md" <<EOF
+---
+name: $n
+description: <What it does, and when Claude should use it: the trigger phrases matter most.>
+---
+
+# $n
+
+<Steps Claude follows. Put scripts it needs next to this file (for example bin/) and refer to
+them by path: ~/.claude/skills/$n/bin/...>
+EOF
+      link "$d" "$HOME/.claude/skills/$n"
+      info "Created $(short "$d")/SKILL.md. Running sessions see it after: $me restart <project>" ;;
+    *) die "usage: $me skill [ls | new <name>]" ;;
+  esac
+}
+
+# ---------- setup ----------
+
+# link <target> <link>: make <link> a symlink to <target>; an existing real file is kept as <link>.pre-erinos.
+link() {
+  local target="$1" l="$2"
+  mkdir -p "$(dirname "$l")"
+  if [[ -L "$l" ]]; then
+    [[ "$(readlink "$l")" == "$target" ]] && return 0
+    rm "$l"
+  elif [[ -e "$l" ]]; then
+    mv "$l" "$l.pre-erinos"; info "  kept the old $(short "$l") as $(short "$l").pre-erinos"
+  fi
+  ln -s "$target" "$l"; info "  linked $(short "$l") -> $(short "$target")"
+}
+
+cmd_setup() {
+  info "erinos: $(short "$ERINOS")"
+  link "$ERINOS/bin/erin" "$HOME/.local/bin/erin"
+  link "$ERINOS/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+  # The machine's own conventions and install log: the public CLAUDE.md imports the first.
+  mkdir -p "$LOCAL"
+  if [[ ! -f "$LOCAL/CLAUDE.md" ]]; then
+    printf '# This machine (local to it, not in the public erinos repo)
+
+<Hardware, workspaces and their owners, servers, language toolchains: what Claude should know about this machine only.>
+' > "$LOCAL/CLAUDE.md"
+    info "  created $(short "$LOCAL")/CLAUDE.md: describe this machine there"
+  fi
+  if [[ ! -f "$LOCAL/tools.md" ]]; then
+    printf '# Installed tools
+
+| Date | Tool | Version | Source | Remove |
+|------|------|---------|--------|--------|
+' > "$LOCAL/tools.md"
+    info "  created $(short "$LOCAL")/tools.md: the install log"
+  fi
+  local d l
+  for d in "$ERINOS"/skills/*/; do [[ -f "$d/SKILL.md" ]] && link "${d%/}" "$HOME/.claude/skills/$(basename "$d")"; done
+  # Drop links to skills that no longer exist in erinos.
+  for l in "$HOME"/.claude/skills/*; do
+    [[ -L "$l" && "$(readlink "$l")" == "$ERINOS"/skills/* && ! -e "$l" ]] && { rm "$l"; info "  removed stale link $(short "$l")"; }
+  done
+  local u
+  for u in "$ERINOS"/systemd/*.service "$ERINOS"/systemd/*.timer; do
+    [[ -f "$u" ]] || continue
+    if [[ "$(readlink -f "$HOME/.config/systemd/user/$(basename "$u")" 2>/dev/null)" != "$u" ]]; then
+      systemctl --user enable "$u" >/dev/null 2>&1 && info "  enabled $(basename "$u")" || info "  ${R}couldn't enable $(basename "$u")${N}"
+    fi
+  done
+  systemctl --user daemon-reload
+  # git gets GitHub tokens from erin (see cmd_git_credential), never from a password prompt.
+  local h want="!$HOME/.local/bin/erin git-credential"
+  for h in https://github.com https://gist.github.com; do
+    if [[ "$(git config --global --get-all "credential.$h.helper" 2>/dev/null | tail -1)" != "$want" ]]; then
+      git config --global --unset-all "credential.$h.helper" 2>/dev/null || true
+      git config --global --add "credential.$h.helper" ""      # drop any helper set elsewhere
+      git config --global --add "credential.$h.helper" "$want"
+      info "  git: credentials for $h come from erin git-credential"
+    fi
+  done
+  # git includes each workspace's .workspace for the repos in it.
+  local ws; while IFS= read -r ws; do ws_wire "$ws"; done < <(workspaces)
+  # erinos commits with one workspace's identity: personal, unless pointed at another.
+  if [[ ! -f "$(erinos_identity)" ]]; then
+    if is_ws personal; then
+      git config --global "$(ws_include_key "$(basename "$ERINOS")")" "~/personal/$WS_FILE"; info "  git: commits in $(short "$ERINOS") use ~/personal/$WS_FILE"
+    else info "  ${Y}note${N} erinos has no commit identity: git config --global '$(ws_include_key "$(basename "$ERINOS")")' '~/<workspace>/$WS_FILE'"; fi
+  fi
+  [[ -n "$(workspaces)" ]] || info "  No workspaces yet: $me workspace new <name> --email EMAIL --owner GITHUB_OWNER"
+  info "Done."
+}
+
+# Problems in the wiring, for doctor.
+check_setup() {
+  local problems=0 d n
+  echo "${B}erinos wiring${N} ${D}$(short "$ERINOS")${N}"
+  chk() { if [[ "$(readlink -f "$2" 2>/dev/null)" == "$(realpath "$1")" ]]; then echo "  ${G}ok${N}   $(short "$2")"; else echo "  ${R}fix${N}  $(short "$2") isn't linked to erinos: $me setup"; problems=$((problems + 1)); fi; }
+  chk "$ERINOS/bin/erin" "$HOME/.local/bin/erin"
+  chk "$ERINOS/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+  local f; for f in CLAUDE.md tools.md; do
+    if [[ -f "$LOCAL/$f" ]]; then echo "  ${G}ok${N}   $(short "$LOCAL")/$f"
+    else echo "  ${R}fix${N}  no $(short "$LOCAL")/$f: $me setup"; problems=$((problems + 1)); fi
+  done
+  for d in "$ERINOS"/skills/*/; do [[ -f "$d/SKILL.md" ]] && chk "${d%/}" "$HOME/.claude/skills/$(basename "$d")"; done
+  for d in "$ERINOS"/systemd/*.service; do [[ -f "$d" ]] && chk "$d" "$HOME/.config/systemd/user/$(basename "$d")"; done
+  if [[ "$(git config --global --get-all credential.https://github.com.helper | tail -1)" == "!$HOME/.local/bin/erin git-credential" ]]; then
+    echo "  ${G}ok${N}   git credentials for github.com come from erin"
+  else echo "  ${R}fix${N}  git credentials for github.com don't come from erin: $me setup"; problems=$((problems + 1)); fi
+  local ws
+  while IFS= read -r ws; do
+    if [[ -z "$(ws_get "$ws" user.email)" ]]; then echo "  ${R}fix${N}  workspace $ws has no email: $me workspace set $ws email <email>"; problems=$((problems + 1))
+    elif [[ "$(git config --global --get "$(ws_include_key "$ws")" 2>/dev/null || true)" != "~/$ws/$WS_FILE" ]]; then
+      echo "  ${R}fix${N}  git doesn't include ~/$ws/$WS_FILE for the repos in ~/$ws: $me setup"; problems=$((problems + 1))
+    else echo "  ${G}ok${N}   workspace $ws: commits as $(ws_get "$ws" user.email)"; fi
+  done < <(workspaces)
+  if [[ -f "$(erinos_identity)" ]]; then echo "  ${G}ok${N}   erinos commits as $(git config -f "$(erinos_identity)" --get user.email)"
+  else echo "  ${R}fix${N}  erinos has no commit identity: $me setup"; problems=$((problems + 1)); fi
+  return "$problems"
+}
+
+# ---------- ls ----------
+
+cmd_ls() {
+  local dir name tok sess remote
+  printf "${B}%-16s %-34s %-9s %-13s %-12s %s${N}\n" PROJECT PATH SESSION TOKEN SYNC REMOTE
+  while IFS= read -r dir; do
+    name="$(name_of "$dir")"
+    if session_exists "$name"; then
+      claude_running "$name" && sess="${G}claude${N}   " || sess="${Y}shell${N}    "
+    else sess="${D}-${N}        "; fi
+    tok="$(token_name "$dir")"
+    if [[ -z "$tok" ]]; then tok="${R}no .envrc${N}    "
+    elif has_token "$tok"; then tok="$(printf '%-13s' "$tok")"
+    else tok="${R}$(printf '%-13s' "$tok!")${N}"; fi
+    remote="$(git -C "$dir" remote get-url origin 2>/dev/null | sed 's#^https://github.com/##; s#\.git$##')"
+    local c a b u sync=""
+    read -r c a b u < <(sync_counts "$dir")
+    [[ "$u" == - ]] && sync+="no-upstream "
+    [[ "$a" -gt 0 ]] && sync+="↑$a "
+    [[ "$b" -gt 0 ]] && sync+="↓$b "
+    [[ "$c" -gt 0 ]] && sync+="~$c "
+    sync="${sync% }"; local pad=$(( 12 - ${#sync} )); [[ -z "$sync" ]] && pad=10
+    if [[ -z "$sync" ]]; then sync="${G}ok${N}"; else sync="${Y}$sync${N}"; fi
+    sync+="$(printf '%*s' "$pad" '')"
+    printf "%-16s %-34s %s %s %s %s\n" "$name" "$(short "$dir")" "$sess" "$tok" "$sync" "${remote:-${D}none${N}}"
+  done < <(projects)
+  echo "${D}token! = .envrc points to a secrets file without GH_TOKEN. SYNC (as of the last fetch): ↑ unpushed commits, ↓ commits to pull, ~ uncommitted files.${N}"
+}
+
+# ---------- doctor ----------
+
+check_project() {
+  local dir="$1" name ws tok url email expected problems=0
+  name="$(name_of "$dir")"; ws="$(workspace_of "$dir")"
+  ok()  { echo "  ${G}ok${N}   $*"; }
+  bad() { echo "  ${R}fix${N}  $*"; problems=$((problems + 1)); }
+  # fixable "<problem>" "<hint>" <command...>: with --fix run the command, otherwise report problem + hint.
+  fixable() {
+    local msg="$1" hint="$2"; shift 2
+    if [[ "${FIX:-0}" -eq 1 ]]; then
+      if "$@" >/dev/null 2>&1; then echo "  ${G}fixed${N} $msg"; else bad "$msg (automatic fix failed: $*)"; fi
+    else bad "$msg: $hint"; fi
+  }
+  echo "${B}$name${N} ${D}$(short "$dir")${N}"
+
+  if [[ "$ws" == erinos ]]; then ok "the erinos repo"
+  elif [[ "$ws" == - ]]; then bad "not in a workspace: commits will fail (user.useConfigOnly)"
+  elif [[ "$(dirname "$dir")" != "$HOME/$ws" ]]; then bad "nested in a subfolder: $me rename $name $ws/$name"
+  else ok "in workspace $ws"; fi
+
+  url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
+  if [[ -z "$url" ]]; then bad "no remote origin"
+  elif [[ "$url" =~ ^https://github\.com/([^/]+)/[^/]+\.git$ ]]; then
+    ok "remote $url"
+    local owner=""; [[ "$ws" == erinos || "$ws" == - ]] || owner="$(ws_get "$ws" erin.owner)"
+    [[ -z "$owner" || "${BASH_REMATCH[1]}" == "$owner" ]] || echo "  ${Y}look${N} the repo belongs to ${BASH_REMATCH[1]}, workspace $ws's owner is $owner"
+  elif [[ "$url" =~ ^(git@github\.com:|ssh://git@github\.com/)([^/]+)/([^/]+)$ ]]; then
+    local https="https://github.com/${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}.git"
+    fixable "remote is SSH ($url)" "git remote set-url origin $https" git -C "$dir" remote set-url origin "$https"
+    [[ "${FIX:-0}" -eq 1 ]] && url="$https"
+  else bad "remote is '$url': use https://github.com/<owner>/<repo>.git"; fi
+  [[ -z "$(git -C "$dir" config --local core.sshCommand || true)" ]] || fixable "core.sshCommand is set" "git config --unset core.sshCommand" git -C "$dir" config --local --unset core.sshCommand
+
+  if [[ ! -f "$dir/.envrc" ]]; then bad "no .envrc"
+  else
+    tok="$(token_name "$dir")"
+    [[ -n "$tok" ]] && ok ".envrc loads ~/.secrets/$tok.env" || bad ".envrc has no 'dotenv ~/.secrets/<name>.env' line"
+    git -C "$dir" check-ignore -q .envrc && ok ".envrc hidden from git" || fixable ".envrc not ignored" "echo .envrc >> .git/info/exclude" sh -c "echo .envrc >> '$dir/.git/info/exclude'"
+    (cd "$dir" && direnv status 2>/dev/null | grep -q '^Found RC allowed 0$') && ok "direnv allowed" || fixable "direnv not allowed" "direnv allow $(short "$dir")" direnv allow "$dir"
+    if [[ -n "$tok" ]]; then
+      if ! has_token "$tok"; then bad "no GH_TOKEN in ~/.secrets/$tok.env: $me secret set $tok GH_TOKEN"
+      elif [[ "$url" =~ ^https://github\.com/([^/]+/[^/]+)\.git$ ]]; then
+        local repo="${BASH_REMATCH[1]}" code
+        code="$( set -a; source "$SECRETS/$tok.env"; set +a
+                 curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                   -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$repo" )" || code=000
+        case "$code" in
+          200) ok "token $tok can read $repo" ;;
+          401) bad "token $tok is rejected by GitHub (expired or revoked): make a new one, then $me secret set $tok GH_TOKEN" ;;
+          404) bad "token $tok can't see $repo: add the repo to the token, or the repo doesn't exist yet" ;;
+          000) echo "  ${Y}?${N}    couldn't reach GitHub to test token $tok" ;;
+          *)   bad "GitHub answered $code for $repo with token $tok" ;;
+        esac
+      fi
+    fi
+  fi
+
+  if [[ "${NO_FETCH:-0}" -eq 0 && -n "$url" ]]; then fetch_origin "$dir" || echo "  ${Y}?${N}    couldn't fetch origin: sync below is as of the last fetch"; fi
+  local c a b u branch; branch="$(git -C "$dir" branch --show-current 2>/dev/null)"
+  read -r c a b u < <(sync_counts "$dir")
+  if [[ -z "$branch" ]]; then echo "  ${Y}look${N} detached HEAD (no branch checked out)"
+  elif [[ "$u" == - ]]; then
+    git -C "$dir" rev-parse -q --verify HEAD >/dev/null && echo "  ${Y}look${N} branch $branch has no upstream: git push -u origin $branch" \
+                                                         || ok "branch $branch, no commits yet"
+  elif [[ "$a" -eq 0 && "$b" -eq 0 ]]; then ok "$branch in sync with $u"
+  else
+    [[ "$a" -gt 0 ]] && echo "  ${Y}look${N} $a commit(s) on $branch not pushed to $u"
+    if [[ "$b" -gt 0 ]]; then
+      # --fix only fast-forwards a clean branch with nothing of its own, and never under a running Claude.
+      if [[ "${FIX:-0}" -eq 1 && "$a" -eq 0 && "$c" -eq 0 ]] && ! claude_running "$name"; then
+        git -C "$dir" merge -q --ff-only '@{u}' && echo "  ${G}fixed${N} pulled $b commit(s) from $u (fast-forward)" \
+          || echo "  ${Y}look${N} $b commit(s) on $u not pulled into $branch (fast-forward failed)"
+      else
+        local why=""; [[ "${FIX:-0}" -eq 1 ]] && why=" (not pulled: $( [[ "$a" -gt 0 ]] && echo "diverged" || { [[ "$c" -gt 0 ]] && echo "uncommitted changes" || echo "Claude is running there, let it pull"; } ))"
+        echo "  ${Y}look${N} $b commit(s) on $u not pulled into $branch$why"
+      fi
+    fi
+  fi
+  [[ "$c" -eq 0 ]] && ok "working tree clean" || echo "  ${Y}look${N} $c uncommitted file(s): git -C $(short "$dir") status"
+
+  [[ -z "$(git -C "$dir" config --local user.email || true)" ]] || fixable "user.email set in the repo (the folder decides)" "git config --unset user.email" git -C "$dir" config --local --unset user.email
+  case "$ws" in
+    erinos) expected="$(git config -f "$(erinos_identity)" --get user.email 2>/dev/null || true)" ;;
+    -) expected= ;;
+    *) expected="$(ws_get "$ws" user.email)" ;;
+  esac
+  email="$(git -C "$dir" config user.email || true)"
+  if [[ -n "$expected" ]]; then
+    [[ "$email" == "$expected" ]] && ok "commits as $email" || bad "commits as '${email:-nobody}', expected $expected"
+  fi
+
+  if claude_running "$name"; then
+    local want label; want="$(session_title "$name")"; label="$(claude_label "$name")"
+    if [[ "$label" == "$want" ]]; then ok "Claude session named $want"
+    elif [[ "${FIX:-0}" -eq 1 ]] && claude_idle "$name"; then
+      tmux send-keys -t "=$name:" C-u; sleep 0.3
+      tmux send-keys -t "=$name:" -l "/rename $want"; sleep 0.5; tmux send-keys -t "=$name:" Enter; sleep 2
+      [[ "$(claude_label "$name")" == "$want" ]] && echo "  ${G}fixed${N} Claude session renamed ${label:-?} -> $want" \
+        || echo "  ${Y}look${N} Claude session is named '${label:-?}', expected $want (rename didn't take: type /rename $want there)"
+    else
+      echo "  ${Y}look${N} Claude session is named '${label:-?}', expected $want$([[ "${FIX:-0}" -eq 1 ]] && echo " (busy now: run --fix again later)" || echo ": $me doctor --fix renames it when idle")"
+    fi
+  fi
+
+  git -C "$dir" ls-files --error-unmatch config/master.key >/dev/null 2>&1 && bad "config/master.key is committed"
+  if command -v gitleaks >/dev/null; then
+    local rc=0
+    gitleaks git --no-banner --redact -l error --exit-code 3 "$dir" >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+      0) ok "gitleaks: no secrets in the git history" ;;
+      3) echo "  ${Y}look${N} gitleaks flags possible secrets in the history, often IDs or examples: gitleaks git --redact -v $(short "$dir")" ;;
+    esac
+  fi
+  return "$problems"
+}
+
+cmd_doctor() {
+  local total=0 dir
+  local args=() x
+  for x in "$@"; do case "$x" in --no-fetch) NO_FETCH=1 ;; --fix) FIX=1 ;; *) args+=("$x") ;; esac; done
+  set -- "${args[@]+"${args[@]}"}"
+  if [[ "${1:-}" == setup ]]; then check_setup || total=$?
+  elif [[ $# -gt 0 ]]; then
+    dir="$(resolve "$1")"
+    check_project "$dir" || total=$?
+  else
+    check_setup || total=$((total + $?)); echo
+    while IFS= read -r dir; do check_project "$dir" || total=$((total + $?)); echo; done < <(projects)
+  fi
+  [[ "$total" -eq 0 ]] && echo "${G}Conventions all good.${N} (\"look\" lines are worth a glance, not errors.)" && return 0
+  echo "${R}$total thing(s) to fix.${N}$([[ "${FIX:-0}" -eq 1 ]] || echo " Safe ones: $me doctor --fix")"; return 1
+}
+
+# ---------- main ----------
+
+case "${1:-help}" in
+  new)        shift; cmd_new "$@" ;;
+  start)      shift; cmd_start "$@" ;;
+  stop)       shift; cmd_stop "$@" ;;
+  attach|a)   shift; cmd_attach "$@" ;;
+  ls|list)    cmd_ls ;;
+  doctor)     shift; cmd_doctor "$@" ;;
+  resume-all) cmd_resume_all ;;
+  rename|mv)  shift; cmd_rename "$@" ;;
+  move)       shift; cmd_move "$@" ;;
+  workspace|workspaces|ws) shift; cmd_workspace "$@" ;;
+  secret|secrets) shift; cmd_secret "$@" ;;
+  skill|skills) shift; cmd_skill "$@" ;;
+  restart)    shift; cmd_restart "$@" ;;
+  setup)      cmd_setup ;;
+  git-credential) shift; cmd_git_credential "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac
