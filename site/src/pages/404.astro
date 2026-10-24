@@ -1,0 +1,38 @@
+---
+// erinos.ai's own "not found" page; GitHub Pages serves 404.html for any missing path.
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Not found · erinos</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main>
+      <p class="code">404</p>
+      <h1>Nothing here.</h1>
+      <p>Looking for the installer? It's at <a href="/install.sh">/install.sh</a>.</p>
+      <p><a href="/">erinos.ai</a></p>
+    </main>
+    <style is:global>
+      :root { --bg: #f6f5f1; --fg: #1c1b19; --muted: #6b6860; --accent: #c2410c; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #121211; --fg: #ecebe6; --muted: #9a978e; --accent: #fb923c; }
+      }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center;
+        background: var(--bg); color: var(--fg);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      main { padding: 0 16px; }
+      .code { font: 600 14px ui-monospace, Menlo, monospace; color: var(--accent); margin: 0; }
+      h1 { font-size: 40px; letter-spacing: -0.03em; margin: 4px 0 12px; }
+      p { color: var(--muted); }
+      a { color: inherit; text-underline-offset: 3px; }
+      a:hover { color: var(--accent); }
+    </style>
+  </body>
+</html>
